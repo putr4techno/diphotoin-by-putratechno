@@ -1,0 +1,6 @@
+{
+  "name": "Mobile Photobooth & Selfie Web App",
+  "description": "Aplikasi Web Photobooth Selfie Mobile-First dengan integrasi Google Drive, overlay frame 9:16, countdown, dan canvas compositing.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
