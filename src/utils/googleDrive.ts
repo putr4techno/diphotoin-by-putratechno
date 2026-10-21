@@ -60,8 +60,63 @@ export function getDriveDirectImageUrl(input: string): string {
   return input;
 }
 
-// Default Google Apps Script Bridge that handles uploads for any public/shared edit folder
-export const DEFAULT_GAS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby-s1bU6j_Z7oPxbzJ1x7X7m_1K3k5fH9pQ8aB_C/exec';
+/**
+ * Checks if the Google Apps Script Web App URL is accessible and active.
+ */
+export async function checkGoogleAppsScriptHealth(url: string): Promise<{ success: boolean; message: string }> {
+  if (!url || !url.trim()) {
+    return { success: false, message: 'URL Web App Google Apps Script masih kosong.' };
+  }
+
+  const cleanUrl = url.trim();
+  if (!cleanUrl.startsWith('https://script.google.com/macros/s/')) {
+    return {
+      success: false,
+      message: 'Format URL salah. URL harus berawalan "https://script.google.com/macros/s/..." dan berakhiran "/exec".',
+    };
+  }
+
+  try {
+    const res = await fetch(cleanUrl, {
+      method: 'GET',
+    });
+
+    const text = await res.text();
+    let data: { status?: string; message?: string } | null = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (text.includes('accounts.google.com') || text.includes('Service Login')) {
+        return {
+          success: false,
+          message: 'Akses Ditolak: Saat deploy Web App, pastikan opsi "Who has access" dipilih "Anyone" (Siapa saja).',
+        };
+      }
+      return {
+        success: false,
+        message: 'Respon dari Google Script bukan JSON. Pastikan Anda menyalin URL Web App (/exec), bukan URL editor.',
+      };
+    }
+
+    if (data && data.status === 'active') {
+      return {
+        success: true,
+        message: '🟢 Koneksi Berhasil! Google Apps Script aktif dan siap menerima foto.',
+      };
+    }
+
+    return {
+      success: true,
+      message: data?.message || '🟢 Terhubung ke Google Apps Script!',
+    };
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      message: `Gagal terhubung (${errorMsg}). Pastikan deployment Google Apps Script diatur ke "Anyone" (Siapa saja).`,
+    };
+  }
+}
 
 /**
  * Uploads captured photobooth image to Google Drive via Google Apps Script Web App.
@@ -75,19 +130,15 @@ export async function uploadToGoogleDrive(params: {
 }): Promise<{ success: boolean; message: string; fileUrl?: string; fileId?: string }> {
   const { gasWebAppUrl, folderId, base64Image, eventName, fileName } = params;
 
-  // Use provided gasWebAppUrl or fallback
   const endpoint = (gasWebAppUrl && gasWebAppUrl.trim()) || '';
-
   const parsedFolderId = folderId ? extractDriveFolderId(folderId) : '';
 
-  if (!endpoint && !parsedFolderId) {
+  if (!endpoint) {
     return {
       success: false,
-      message: 'Masukkan Link Folder Google Drive dengan akses edit di Panel Admin.',
+      message: 'URL Web App Google Apps Script belum diisi di Panel Admin. Silakan buka menu Pengaturan Admin ➔ Google Drive untuk menghubungkannya.',
     };
   }
-
-  const effectiveEndpoint = endpoint || DEFAULT_GAS_BRIDGE_URL;
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safeEvent = (eventName || 'Photobooth').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -107,7 +158,7 @@ export async function uploadToGoogleDrive(params: {
   };
 
   try {
-    const response = await fetch(effectiveEndpoint.trim(), {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
@@ -115,35 +166,55 @@ export async function uploadToGoogleDrive(params: {
       body: JSON.stringify(payload),
     });
 
-    if (!response.ok && response.type !== 'opaque') {
-      throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
-    }
+    const text = await response.text();
+    let data: {
+      status?: string;
+      message?: string;
+      fileUrl?: string;
+      url?: string;
+      fileId?: string;
+      id?: string;
+      folderName?: string;
+      error?: string;
+    } | null = null;
 
     try {
-      const data = await response.json();
-      if (data && data.status === 'success') {
-        return {
-          success: true,
-          message: `Berhasil disimpan ke Google Drive (${data.folderName || 'Folder Target'})!`,
-          fileUrl: data.fileUrl || data.url,
-          fileId: data.fileId || data.id,
-        };
-      } else if (data && data.error) {
+      data = JSON.parse(text);
+    } catch {
+      if (text.includes('accounts.google.com') || text.includes('Service Login')) {
         return {
           success: false,
-          message: `Gagal dari Google Script: ${data.error}`,
+          message: 'Akses Google ditolak: Pastikan saat Deploy di Google Script, opsi "Who has access" disetel ke "Anyone" (Siapa saja).',
         };
       }
-    } catch {
+      return {
+        success: false,
+        message: 'Respon dari Google Script tidak valid. Silakan periksa kembali URL Web App Anda di panel admin.',
+      };
+    }
+
+    if (data && data.status === 'success') {
+      const publicUrl =
+        data.fileUrl ||
+        data.url ||
+        (data.fileId ? `https://drive.google.com/file/d/${data.fileId}/view` : undefined);
+
       return {
         success: true,
-        message: 'Foto berhasil dikirim ke Google Drive!',
+        message: `Foto berhasil tersimpan di Google Drive (${data.folderName || 'Folder Target'})!`,
+        fileUrl: publicUrl,
+        fileId: data.fileId || data.id,
+      };
+    } else if (data && (data.error || data.message)) {
+      return {
+        success: false,
+        message: `Gagal dari Google Script: ${data.error || data.message}`,
       };
     }
 
     return {
-      success: true,
-      message: 'Foto berhasil disimpan ke Google Drive!',
+      success: false,
+      message: 'Respon tidak dikenal dari Google Script.',
     };
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -151,7 +222,7 @@ export async function uploadToGoogleDrive(params: {
 
     return {
       success: false,
-      message: `Gagal menyimpan ke Google Drive: ${errorMsg}. Pastikan folder Drive memiliki akses "Siapa saja yang memiliki link dapat mengedit".`,
+      message: `Gagal menyimpan ke Google Drive: ${errorMsg}. Pastikan URL Web App benar dan opsi akses disetel ke "Anyone".`,
     };
   }
 }

@@ -294,13 +294,16 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
         )}
 
         {uploadStatus.state === 'idle' && !settings.gasWebAppUrl && (
-          <div className="flex items-center justify-between py-1 px-3 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 text-[11px]">
-            <span>Cloud Drive belum dihubungkan</span>
+          <div className="flex items-center justify-between py-1.5 px-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs">
+            <div className="flex items-center gap-1.5 truncate">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span className="truncate">Google Drive belum aktif (URL Web App Script kosong)</span>
+            </div>
             <button
               onClick={onOpenAdmin}
-              className="text-rose-400 hover:text-rose-300 font-medium underline"
+              className="text-amber-300 hover:text-white font-bold underline shrink-0 ml-2"
             >
-              Atur di Admin
+              Hubungkan
             </button>
           </div>
         )}
