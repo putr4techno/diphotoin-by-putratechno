@@ -11,9 +11,10 @@ import {
   Sparkles,
   Check,
   QrCode,
+  Repeat,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { AppSettings, ColorFilter, FrameConfig, UploadStatus } from '../types';
+import { AppSettings, ColorFilter, FrameConfig, UploadStatus, CaptureMode } from '../types';
 import { uploadToGoogleDrive, extractDriveFolderId } from '../utils/googleDrive';
 import { soundEffects } from '../utils/audio';
 import { getFilterDefinition } from '../utils/filters';
@@ -21,6 +22,9 @@ import { QRCodeModal } from './QRCodeModal';
 
 interface PhotoPreviewProps {
   photoDataUrl: string;
+  videoUrl?: string;
+  videoBlob?: Blob;
+  mediaType?: CaptureMode;
   frame: FrameConfig;
   settings: AppSettings;
   appliedFilter?: ColorFilter;
@@ -31,9 +35,12 @@ interface PhotoPreviewProps {
 
 export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
   photoDataUrl,
+  videoUrl,
+  videoBlob,
+  mediaType = 'photo',
   frame,
   settings,
-  appliedFilter = 'beauty',
+  appliedFilter = 'none',
   onRetake,
   onChangeFrame,
   onOpenAdmin,
@@ -47,6 +54,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
   const [isQrModalOpen, setIsQrModalOpen] = useState<boolean>(false);
 
   const filterDef = getFilterDefinition(appliedFilter);
+  const isBoomerang = mediaType === 'boomerang';
 
   // Launch celebration confetti and sound
   useEffect(() => {
@@ -63,7 +71,19 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
     }
   }, []);
 
-  // Auto-upload in background to Google Drive
+  // Helper to convert Blob to Base64
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        resolve(reader.result as string);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  // Auto-upload in background to Google Drive for Photo or Boomerang Video
   useEffect(() => {
     let isMounted = true;
 
@@ -79,35 +99,56 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
         return;
       }
 
+      // If Google Apps Script Web App URL is provided
       if (settings.gasWebAppUrl && settings.gasWebAppUrl.trim()) {
         if (isMounted) {
           setUploadStatus({
             state: 'uploading',
-            message: 'Menyimpan foto ke Google Drive...',
+            message: isBoomerang ? 'Menyimpan video boomerang ke Google Drive...' : 'Menyimpan foto ke Google Drive...',
           });
         }
 
-        const result = await uploadToGoogleDrive({
-          gasWebAppUrl: settings.gasWebAppUrl,
-          folderId: settings.driveFolderId,
-          base64Image: photoDataUrl,
-          eventName: settings.eventName,
-        });
+        try {
+          let base64Payload = photoDataUrl;
+          let mimeType = 'image/png';
 
-        if (isMounted) {
-          if (result.success) {
-            setUploadStatus({
-              state: 'success',
-              message: 'Tersimpan ke Google Drive!',
-              fileUrl: result.fileUrl,
-              fileId: result.fileId,
-            });
-            return;
+          if (isBoomerang && videoBlob) {
+            base64Payload = await blobToBase64(videoBlob);
+            mimeType = videoBlob.type || 'video/mp4';
           }
+
+          const result = await uploadToGoogleDrive({
+            gasWebAppUrl: settings.gasWebAppUrl,
+            folderId: settings.driveFolderId,
+            base64Data: base64Payload,
+            mimeType,
+            mediaType,
+            eventName: settings.eventName,
+          });
+
+          if (isMounted) {
+            if (result.success) {
+              setUploadStatus({
+                state: 'success',
+                message: isBoomerang ? 'Video Boomerang tersimpan di Drive!' : 'Tersimpan ke Google Drive!',
+                fileUrl: result.fileUrl,
+                fileId: result.fileId,
+              });
+              return;
+            } else {
+              setUploadStatus({
+                state: 'error',
+                message: result.message,
+              });
+              return;
+            }
+          }
+        } catch (uploadErr) {
+          console.warn('Auto upload failed:', uploadErr);
         }
       }
 
-      // If direct folder link is configured
+      // If direct folder link is configured without GAS URL
       if (isMounted && folderId) {
         setUploadStatus({
           state: 'success',
@@ -123,23 +164,38 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [photoDataUrl, settings.driveFolderId, settings.eventName, settings.gasWebAppUrl]);
+  }, [isBoomerang, mediaType, photoDataUrl, settings.driveFolderId, settings.eventName, settings.gasWebAppUrl, videoBlob]);
 
-  // Download photo to local device
+  // Download photo or video to local device
   const handleDownload = () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const safeBrand = (settings.brandName || 'Photobooth').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const filename = `${safeBrand}_${timestamp}.png`;
 
-    const a = document.createElement('a');
-    a.href = photoDataUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    if (isBoomerang && videoUrl) {
+      const ext = videoBlob?.type.includes('webm') ? 'webm' : 'mp4';
+      const filename = `${safeBrand}_Boomerang_${timestamp}.${ext}`;
+      const a = document.createElement('a');
+      a.href = videoUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setShareToast('Video Boomerang diunduh ke galeri! 📥');
+      setTimeout(() => setShareToast(null), 3000);
+    } else {
+      const filename = `${safeBrand}_${timestamp}.png`;
+      const a = document.createElement('a');
+      a.href = photoDataUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setShareToast('Foto diunduh ke galeri! 📥');
+      setTimeout(() => setShareToast(null), 3000);
+    }
   };
 
-  // Native Web Share API (share high-res PNG file directly to Instagram, WhatsApp, Stories, AirDrop)
+  // Native Web Share API (share video or image file directly)
   const handleNativeShare = async () => {
     if (isSharing) return;
     setIsSharing(true);
@@ -147,55 +203,47 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const safeBrand = (settings.brandName || 'Photobooth').replace(/[^a-zA-Z0-9_-]/g, '_');
-      const filename = `${safeBrand}_${timestamp}.png`;
-
-      // Convert data URL to Blob for native file sharing
-      const res = await fetch(photoDataUrl);
-      const blob = await res.blob();
-      const file = new File([blob], filename, { type: 'image/png' });
-
-      const shareText = `Selfie photobooth di ${settings.eventName || settings.brandName}! 📸✨`;
+      const shareText = isBoomerang
+        ? `Video Boomerang photobooth di ${settings.eventName || settings.brandName}! 🔄✨`
+        : `Selfie photobooth di ${settings.eventName || settings.brandName}! 📸✨`;
       const shareTitle = settings.eventName || `${settings.brandName} Photobooth`;
 
+      let fileToShare: File | null = null;
+
+      if (isBoomerang && videoBlob) {
+        const ext = videoBlob.type.includes('webm') ? 'webm' : 'mp4';
+        const filename = `${safeBrand}_Boomerang_${timestamp}.${ext}`;
+        fileToShare = new File([videoBlob], filename, { type: videoBlob.type || 'video/mp4' });
+      } else {
+        const res = await fetch(photoDataUrl);
+        const blob = await res.blob();
+        const filename = `${safeBrand}_${timestamp}.png`;
+        fileToShare = new File([blob], filename, { type: 'image/png' });
+      }
+
       // 1. Try sharing actual file via Web Share API
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      if (fileToShare && navigator.canShare && navigator.canShare({ files: [fileToShare] })) {
         await navigator.share({
           title: shareTitle,
           text: shareText,
-          files: [file],
+          files: [fileToShare],
         });
-        setShareToast('Foto siap dibagikan! 🎉');
+        setShareToast('Berhasil dibagikan! 🎉');
         setTimeout(() => setShareToast(null), 3000);
       }
-      // 2. Fallback: Share URL / text if file sharing is not supported by device
+      // 2. Fallback: Share URL / text
       else if (navigator.share) {
         await navigator.share({
           title: shareTitle,
           text: shareText,
           url: uploadStatus.fileUrl || window.location.href,
         });
-        setShareToast('Tautan foto berhasil dibagikan! 🎉');
+        setShareToast('Tautan berhasil dibagikan! 🎉');
         setTimeout(() => setShareToast(null), 3000);
       }
-      // 3. Fallback for desktop / unsupported browsers: Copy to clipboard or download
+      // 3. Fallback: Download
       else {
-        if (navigator.clipboard && window.ClipboardItem) {
-          try {
-            await navigator.clipboard.write([
-              new ClipboardItem({ 'image/png': blob }),
-            ]);
-            setShareToast('Foto disalin ke Clipboard! Siap ditempel 📋');
-            setTimeout(() => setShareToast(null), 3500);
-          } catch {
-            handleDownload();
-            setShareToast('Foto diunduh ke galeri perangkat! 📥');
-            setTimeout(() => setShareToast(null), 3000);
-          }
-        } else {
-          handleDownload();
-          setShareToast('Foto diunduh ke galeri perangkat! 📥');
-          setTimeout(() => setShareToast(null), 3000);
-        }
+        handleDownload();
       }
     } catch (err: unknown) {
       const error = err as Error;
@@ -204,8 +252,6 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
       } else {
         console.error('Web Share failed:', err);
         handleDownload();
-        setShareToast('Foto diunduh ke galeri untuk dibagikan!');
-        setTimeout(() => setShareToast(null), 3000);
       }
     } finally {
       setIsSharing(false);
@@ -213,34 +259,47 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
   };
 
   const handleRetryUpload = async () => {
-    if (!settings.gasWebAppUrl) {
-      onOpenAdmin();
-      return;
-    }
-
     setUploadStatus({
       state: 'uploading',
-      message: 'Mencoba kembali menyimpan foto...',
+      message: 'Mencoba kembali menyimpan ke Google Drive...',
     });
 
-    const result = await uploadToGoogleDrive({
-      gasWebAppUrl: settings.gasWebAppUrl,
-      folderId: settings.driveFolderId,
-      base64Image: photoDataUrl,
-      eventName: settings.eventName,
-    });
+    try {
+      let base64Payload = photoDataUrl;
+      let mimeType = 'image/png';
 
-    if (result.success) {
-      setUploadStatus({
-        state: 'success',
-        message: 'Tersimpan ke Google Drive!',
-        fileUrl: result.fileUrl,
-        fileId: result.fileId,
+      if (isBoomerang && videoBlob) {
+        base64Payload = await blobToBase64(videoBlob);
+        mimeType = videoBlob.type || 'video/mp4';
+      }
+
+      const result = await uploadToGoogleDrive({
+        gasWebAppUrl: settings.gasWebAppUrl,
+        folderId: settings.driveFolderId,
+        base64Data: base64Payload,
+        mimeType,
+        mediaType,
+        eventName: settings.eventName,
       });
-    } else {
+
+      if (result.success) {
+        setUploadStatus({
+          state: 'success',
+          message: isBoomerang ? 'Video Boomerang tersimpan di Drive!' : 'Tersimpan ke Google Drive!',
+          fileUrl: result.fileUrl,
+          fileId: result.fileId,
+        });
+      } else {
+        setUploadStatus({
+          state: 'error',
+          message: result.message,
+        });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       setUploadStatus({
         state: 'error',
-        message: result.message,
+        message: `Gagal: ${msg}`,
       });
     }
   };
@@ -277,9 +336,9 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
                   href={uploadStatus.fileUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex items-center gap-1 text-[11px] text-emerald-400 underline"
+                  className="flex items-center gap-1 text-[11px] text-emerald-400 underline font-bold"
                 >
-                  <span>Buka</span>
+                  <span>Buka Drive</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
               )}
@@ -318,19 +377,38 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
         )}
       </div>
 
-      {/* Finished Composited Photo Preview Card (9:16) */}
-      <div className="relative w-full aspect-[9/16] max-h-[64dvh] mx-auto rounded-3xl overflow-hidden bg-zinc-950 border-2 border-zinc-800 shadow-2xl flex items-center justify-center my-auto">
-        <img
-          src={photoDataUrl}
-          alt="Hasil Photobooth"
-          className="w-full h-full object-contain"
-        />
+      {/* Finished Media Preview Card: Adaptive to native phone ratio */}
+      <div className="relative w-full max-w-sm max-h-[66dvh] mx-auto rounded-3xl overflow-hidden bg-zinc-950 border-2 border-zinc-800 shadow-2xl flex items-center justify-center my-auto aspect-auto min-h-[360px]">
+        {isBoomerang && videoUrl ? (
+          <video
+            src={videoUrl}
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="w-full h-full object-contain"
+          />
+        ) : (
+          <img
+            src={photoDataUrl}
+            alt="Hasil Photobooth"
+            className="w-full h-full object-contain"
+          />
+        )}
 
-        {/* Frame & Filter Badges */}
-        <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5">
+        {/* Frame, Boomerang, and Filter Badges */}
+        <div className="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-1.5">
           <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md text-white border border-white/10 uppercase tracking-wider">
             {frame.name}
           </span>
+
+          {isBoomerang && (
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-500 to-rose-500 backdrop-blur-md text-white border border-amber-300/30 flex items-center gap-1 shadow-md">
+              <Repeat className="w-2.5 h-2.5" />
+              <span>Boomerang</span>
+            </span>
+          )}
+
           {filterDef && (
             <span
               className={`text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur-md text-white border flex items-center gap-1 ${
@@ -347,7 +425,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
           )}
         </div>
 
-        {/* Floating Quick QR Button in top-right of photo */}
+        {/* Floating Quick QR Button */}
         <button
           onClick={() => setIsQrModalOpen(true)}
           type="button"
@@ -370,7 +448,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
 
       {/* Action Buttons: Download, Native Share, QR Code, Retake, Change Frame */}
       <div className="w-full flex flex-col gap-2 mt-auto pt-2">
-        {/* Main Actions: Unduh Foto & Native Bagikan */}
+        {/* Main Actions: Unduh & Bagikan */}
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={handleDownload}
@@ -378,7 +456,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
             className="w-full py-3 px-3 rounded-2xl bg-zinc-850 hover:bg-zinc-800 active:scale-[0.98] text-zinc-100 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 border border-zinc-700 shadow-md transition-all"
           >
             <Download className="w-4 h-4 text-zinc-300" />
-            <span>Unduh Foto</span>
+            <span>{isBoomerang ? 'Unduh Boomerang' : 'Unduh Foto'}</span>
           </button>
 
           <button
@@ -395,7 +473,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
             ) : (
               <>
                 <Share2 className="w-4 h-4 text-white" />
-                <span>Bagikan</span>
+                <span>Bagikan {isBoomerang ? 'Video' : 'Foto'}</span>
               </>
             )}
           </button>
@@ -419,7 +497,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
             className="w-full py-2 px-3 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 active:scale-[0.98] text-zinc-300 font-semibold text-xs flex items-center justify-center gap-1.5 border border-zinc-800 transition-all"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>Foto Ulang</span>
+            <span>Ulangi Pengambilan</span>
           </button>
 
           <button

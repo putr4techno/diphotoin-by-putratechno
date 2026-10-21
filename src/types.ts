@@ -33,6 +33,15 @@ export interface AppSettings {
 
 export type AppView = 'select-frame' | 'camera' | 'preview';
 
+export type CaptureMode = 'photo' | 'boomerang';
+
+export interface CapturedMedia {
+  type: CaptureMode;
+  photoDataUrl: string;
+  videoUrl?: string;
+  videoBlob?: Blob;
+}
+
 export interface UploadStatus {
   state: 'idle' | 'uploading' | 'success' | 'error';
   message: string;

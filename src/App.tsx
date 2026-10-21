@@ -5,9 +5,10 @@
 
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { AppSettings, AppView, ColorFilter, FrameConfig } from './types';
+import { AppSettings, AppView, ColorFilter, FrameConfig, CapturedMedia } from './types';
 import { loadSettings, saveSettings, resetSettings } from './utils/storage';
 import { compositePhoto } from './utils/canvasComposer';
+import { BoomerangResult } from './utils/boomerang';
 import { Header } from './components/Header';
 import { FrameSelector } from './components/FrameSelector';
 import { CameraCapture } from './components/CameraCapture';
@@ -18,8 +19,8 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [view, setView] = useState<AppView>('select-frame');
   const [selectedFrameId, setSelectedFrameId] = useState<'frame1' | 'frame2' | null>(null);
-  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
-  const [appliedFilter, setAppliedFilter] = useState<ColorFilter>('beauty'); // Default: Beauty
+  const [capturedMedia, setCapturedMedia] = useState<CapturedMedia | null>(null);
+  const [appliedFilter, setAppliedFilter] = useState<ColorFilter>('none'); // Default: Natural / Tanpa Efek
   const [isCompositing, setIsCompositing] = useState<boolean>(false);
   const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
 
@@ -39,16 +40,19 @@ export default function App() {
   };
 
   // Photo captured from camera with filter
-  const handleCaptured = async (
+  const handleCapturedPhoto = async (
     source: HTMLVideoElement | HTMLImageElement,
     mirror: boolean,
-    filter: ColorFilter = 'beauty'
+    filter: ColorFilter = 'none'
   ) => {
     setIsCompositing(true);
     setAppliedFilter(filter);
     try {
       const result = await compositePhoto(source, activeFrame, settings, mirror, filter);
-      setPhotoDataUrl(result.dataUrl);
+      setCapturedMedia({
+        type: 'photo',
+        photoDataUrl: result.dataUrl,
+      });
       setView('preview');
     } catch (err) {
       console.error('Compositing failed:', err);
@@ -58,15 +62,27 @@ export default function App() {
     }
   };
 
-  // Retake photo with same frame
+  // Boomerang captured
+  const handleCapturedBoomerang = (result: BoomerangResult, filter: ColorFilter) => {
+    setAppliedFilter(filter);
+    setCapturedMedia({
+      type: 'boomerang',
+      photoDataUrl: result.posterDataUrl,
+      videoUrl: result.videoUrl,
+      videoBlob: result.videoBlob,
+    });
+    setView('preview');
+  };
+
+  // Retake photo or boomerang
   const handleRetake = () => {
-    setPhotoDataUrl(null);
+    setCapturedMedia(null);
     setView('camera');
   };
 
   // Change frame
   const handleChangeFrame = () => {
-    setPhotoDataUrl(null);
+    setCapturedMedia(null);
     setView('select-frame');
   };
 
@@ -113,14 +129,18 @@ export default function App() {
             settings={settings}
             frame={activeFrame}
             initialFilter={appliedFilter}
-            onCaptured={handleCaptured}
+            onCapturedPhoto={handleCapturedPhoto}
+            onCapturedBoomerang={handleCapturedBoomerang}
             onBack={() => setView('select-frame')}
           />
         )}
 
-        {view === 'preview' && photoDataUrl && (
+        {view === 'preview' && capturedMedia && (
           <PhotoPreview
-            photoDataUrl={photoDataUrl}
+            photoDataUrl={capturedMedia.photoDataUrl}
+            videoUrl={capturedMedia.videoUrl}
+            videoBlob={capturedMedia.videoBlob}
+            mediaType={capturedMedia.type}
             frame={activeFrame}
             settings={settings}
             appliedFilter={appliedFilter}
@@ -142,10 +162,10 @@ export default function App() {
           </div>
           <div className="text-center">
             <h4 className="text-sm font-bold text-white tracking-wide">
-              Menyatukan Foto 9:16 Resolusi Tinggi...
+              Menyatukan Foto Resolusi Tinggi...
             </h4>
             <p className="text-xs text-zinc-400 mt-1">
-              Merender 1080 x 1920 piksel dengan frame & efek wajah
+              Merender hasil foto dengan frame & efek kamera
             </p>
           </div>
         </div>

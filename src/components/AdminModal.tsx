@@ -90,11 +90,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   // Handle PIN verification
   const handleVerifyPin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pinInput === settings.adminPassword || pinInput === 'admin123') {
+    const currentPassword = settings.adminPassword || 'admin123';
+    if (pinInput === currentPassword) {
       setIsAuthenticated(true);
       setPinError(null);
     } else {
-      setPinError('Kata sandi salah. Kata sandi bawaan adalah admin123');
+      setPinError('Kata sandi yang Anda masukkan salah. Silakan coba lagi.');
     }
   };
 
@@ -147,11 +148,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   // Save changes
   const handleSaveAll = () => {
     onSave(form);
-    setSaveToast('Pengaturan berhasil disimpan ke browser!');
+    setSaveToast('Pengaturan & kata sandi baru berhasil disimpan!');
     setTimeout(() => {
       setSaveToast(null);
+      setIsAuthenticated(false);
+      setPinInput('');
       onClose();
-    }, 1000);
+    }, 900);
   };
 
   // Copy shareable guest URL
@@ -258,7 +261,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             </div>
             <h4 className="text-base font-bold text-white">Masukkan Kata Sandi Admin</h4>
             <p className="text-xs text-zinc-400 mt-1 mb-4 max-w-xs">
-              Akses panel admin dibatasi untuk pengelola acara. (Kata sandi default: <span className="font-mono text-rose-300">admin123</span>)
+              Akses panel admin dibatasi khusus untuk pengelola acara. Masukkan kata sandi untuk melanjutkan.
             </p>
 
             <form onSubmit={handleVerifyPin} className="w-full max-w-xs flex flex-col gap-3">
@@ -636,9 +639,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       type="text"
                       value={form.adminPassword}
                       onChange={(e) => setForm({ ...form, adminPassword: e.target.value })}
-                      placeholder="Default: admin123"
+                      placeholder="Masukkan kata sandi baru"
                       className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white font-mono focus:outline-none focus:border-rose-500"
                     />
+                    <p className="text-[10px] text-zinc-400 mt-1">
+                      Kata sandi baru akan langsung aktif dan wajib digunakan pada saat login admin berikutnya.
+                    </p>
                   </div>
                 </div>
               )}

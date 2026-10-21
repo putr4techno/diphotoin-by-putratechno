@@ -119,38 +119,55 @@ export async function checkGoogleAppsScriptHealth(url: string): Promise<{ succes
 }
 
 /**
- * Uploads captured photobooth image to Google Drive via Google Apps Script Web App.
+ * Uploads captured photobooth image or boomerang video to Google Drive via Google Apps Script Web App.
  */
 export async function uploadToGoogleDrive(params: {
   gasWebAppUrl?: string;
   folderId?: string;
-  base64Image: string;
+  base64Image?: string;
+  base64Data?: string;
+  mimeType?: string;
+  mediaType?: 'photo' | 'boomerang';
   eventName?: string;
   fileName?: string;
-}): Promise<{ success: boolean; message: string; fileUrl?: string; fileId?: string }> {
-  const { gasWebAppUrl, folderId, base64Image, eventName, fileName } = params;
+}): Promise<{ success: boolean; message: string; fileUrl?: string; fileId?: string; isDirectFolder?: boolean }> {
+  const { gasWebAppUrl, folderId, base64Image, base64Data, mimeType, mediaType = 'photo', eventName, fileName } = params;
 
+  const rawData = base64Data || base64Image || '';
   const endpoint = (gasWebAppUrl && gasWebAppUrl.trim()) || '';
   const parsedFolderId = folderId ? extractDriveFolderId(folderId) : '';
 
   if (!endpoint) {
+    if (parsedFolderId) {
+      return {
+        success: true,
+        isDirectFolder: true,
+        message: 'Folder Google Drive terhubung!',
+        fileUrl: `https://drive.google.com/drive/folders/${parsedFolderId}`,
+        fileId: parsedFolderId,
+      };
+    }
     return {
       success: false,
-      message: 'URL Web App Google Apps Script belum diisi di Panel Admin. Silakan buka menu Pengaturan Admin ➔ Google Drive untuk menghubungkannya.',
+      message: 'Link Folder Google Drive belum diisi di Panel Admin.',
     };
   }
 
+  const isVideo = mediaType === 'boomerang' || (mimeType && mimeType.startsWith('video/'));
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safeEvent = (eventName || 'Photobooth').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const finalFileName = fileName || `Photobooth_${safeEvent}_${timestamp}.png`;
+  const extension = isVideo ? (mimeType?.includes('webm') ? 'webm' : 'mp4') : 'png';
+  const finalFileName = fileName || `${isVideo ? 'Boomerang' : 'Photobooth'}_${safeEvent}_${timestamp}.${extension}`;
+  const finalMimeType = mimeType || (isVideo ? 'video/mp4' : 'image/png');
 
-  // Strip data:image/...;base64, prefix if present
-  const pureBase64 = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
+  // Strip data:...;base64, prefix if present
+  const pureBase64 = rawData.includes(',') ? rawData.split(',')[1] : rawData;
 
   const payload = {
     image: pureBase64,
     filename: finalFileName,
-    mimeType: 'image/png',
+    mimeType: finalMimeType,
+    mediaType,
     folderId: parsedFolderId,
     folderName: 'HASILFOTO',
     eventName: eventName || 'Mobile Photobooth',
