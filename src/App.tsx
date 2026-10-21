@@ -19,7 +19,7 @@ export default function App() {
   const [view, setView] = useState<AppView>('select-frame');
   const [selectedFrameId, setSelectedFrameId] = useState<'frame1' | 'frame2' | null>(null);
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
-  const [appliedFilter, setAppliedFilter] = useState<ColorFilter>('original');
+  const [appliedFilter, setAppliedFilter] = useState<ColorFilter>('beauty'); // Default: Beauty
   const [isCompositing, setIsCompositing] = useState<boolean>(false);
   const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
 
@@ -42,7 +42,7 @@ export default function App() {
   const handleCaptured = async (
     source: HTMLVideoElement | HTMLImageElement,
     mirror: boolean,
-    filter: ColorFilter = 'original'
+    filter: ColorFilter = 'beauty'
   ) => {
     setIsCompositing(true);
     setAppliedFilter(filter);
@@ -101,7 +101,9 @@ export default function App() {
           <FrameSelector
             settings={settings}
             selectedFrameId={selectedFrameId}
+            selectedFilter={appliedFilter}
             onSelectFrame={handleSelectFrame}
+            onSelectFilter={setAppliedFilter}
             onStartPhoto={handleStartPhoto}
           />
         )}
@@ -110,6 +112,7 @@ export default function App() {
           <CameraCapture
             settings={settings}
             frame={activeFrame}
+            initialFilter={appliedFilter}
             onCaptured={handleCaptured}
             onBack={() => setView('select-frame')}
           />
@@ -142,7 +145,7 @@ export default function App() {
               Menyatukan Foto 9:16 Resolusi Tinggi...
             </h4>
             <p className="text-xs text-zinc-400 mt-1">
-              Merender 1080 x 1920 piksel dengan frame & filter presisi
+              Merender 1080 x 1920 piksel dengan frame & efek wajah
             </p>
           </div>
         </div>

@@ -1,4 +1,4 @@
-export type ColorFilter = 'original' | 'bw' | 'vintage';
+export type ColorFilter = 'beauty' | 'glowing';
 
 export interface FrameConfig {
   id: 'frame1' | 'frame2';
@@ -21,7 +21,7 @@ export interface AppSettings {
   adminPassword: string;
   // Google Drive & GAS Settings
   gasWebAppUrl: string; // Google Apps Script Web App URL
-  driveFolderId: string; // Target folder ID for HASILFOTO
+  driveFolderId: string; // Target folder ID / Link for HASILFOTO
   autoUploadEnabled: boolean;
   // Frames
   frame1: FrameConfig;

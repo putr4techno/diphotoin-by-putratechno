@@ -33,7 +33,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
   photoDataUrl,
   frame,
   settings,
-  appliedFilter = 'original',
+  appliedFilter = 'beauty',
   onRetake,
   onChangeFrame,
   onOpenAdmin,
@@ -319,7 +319,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
           <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md text-white border border-white/10 uppercase tracking-wider">
             {frame.name}
           </span>
-          {appliedFilter !== 'original' && (
+          {filterDef && (
             <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-rose-500/80 backdrop-blur-md text-white border border-rose-400/30 flex items-center gap-1">
               <Sparkles className="w-2.5 h-2.5" />
               <span>{filterDef.label}</span>

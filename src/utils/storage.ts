@@ -12,7 +12,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   driveFolderId: '',
   autoUploadEnabled: true,
   mirrorDefault: true,
-  countdownSeconds: 3,
+  countdownSeconds: 5, // Default changed to 5 seconds as requested
   frame1: {
     id: 'frame1',
     name: 'Classic Ivory Luxe',
@@ -135,6 +135,7 @@ export function loadSettings(): AppSettings {
       ...parsed,
       frame1: { ...DEFAULT_SETTINGS.frame1, ...parsed.frame1 },
       frame2: { ...DEFAULT_SETTINGS.frame2, ...parsed.frame2 },
+      countdownSeconds: parsed.countdownSeconds ?? 5,
     };
   } catch (err) {
     console.error('Failed to load settings from localStorage:', err);

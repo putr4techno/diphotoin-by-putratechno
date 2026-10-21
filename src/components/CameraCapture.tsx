@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { RefreshCw, FlipHorizontal, ArrowLeft, AlertCircle, Upload, Zap, Sparkles } from 'lucide-react';
+import { RefreshCw, FlipHorizontal, ArrowLeft, AlertCircle, Upload, Zap } from 'lucide-react';
 import { AppSettings, ColorFilter, FrameConfig } from '../types';
 import { FrameOverlayVisual } from './DefaultFrames';
 import { soundEffects } from '../utils/audio';
@@ -8,6 +8,7 @@ import { COLOR_FILTERS, getFilterDefinition } from '../utils/filters';
 interface CameraCaptureProps {
   settings: AppSettings;
   frame: FrameConfig;
+  initialFilter?: ColorFilter;
   onCaptured: (source: HTMLVideoElement | HTMLImageElement, mirror: boolean, filter: ColorFilter) => void;
   onBack: () => void;
 }
@@ -15,6 +16,7 @@ interface CameraCaptureProps {
 export const CameraCapture: React.FC<CameraCaptureProps> = ({
   settings,
   frame,
+  initialFilter = 'beauty',
   onCaptured,
   onBack,
 }) => {
@@ -23,7 +25,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
 
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [isMirror, setIsMirror] = useState<boolean>(settings.mirrorDefault);
-  const [selectedFilter, setSelectedFilter] = useState<ColorFilter>('original');
+  const [selectedFilter, setSelectedFilter] = useState<ColorFilter>(initialFilter);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isFlashing, setIsFlashing] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -95,11 +97,11 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
     }
   }, [facingMode, stopCamera]);
 
-  // Handle countdown & capture
+  // Handle countdown & capture - Updated to 5 seconds by default
   const triggerCapture = useCallback(() => {
     if (countdown !== null) return;
 
-    let currentCount = settings.countdownSeconds || 3;
+    let currentCount = settings.countdownSeconds || 5;
     setCountdown(currentCount);
     soundEffects.playTick();
 
@@ -137,7 +139,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
     };
   }, [startCamera, stopCamera]);
 
-  // Auto trigger countdown when camera starts for seamless booth experience
+  // Auto trigger countdown when camera starts
   useEffect(() => {
     if (!isLoadingCamera && !cameraError && countdown === null) {
       const timer = setTimeout(() => {
@@ -274,7 +276,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
           className="absolute inset-0 pointer-events-none z-10"
         />
 
-        {/* Big Countdown Timer Overlay */}
+        {/* Big Countdown Timer Overlay (5 to 1) */}
         {countdown !== null && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 backdrop-blur-[2px] pointer-events-none">
             <div className="relative flex items-center justify-center animate-ping duration-700">
@@ -293,31 +295,26 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
 
       {/* Filter Selector Utility & Shutter Bar */}
       <div className="flex flex-col items-center gap-2 pt-2 z-20">
-        {/* Color Filter Selector (Original, Black & White, Vintage) */}
+        {/* Effect Selector: Only Beauty & Glowing */}
         <div className="flex items-center gap-1.5 p-1 rounded-full bg-zinc-900/90 border border-zinc-800/80 backdrop-blur-md shadow-lg max-w-xs w-full justify-center">
           {COLOR_FILTERS.map((f) => {
             const isActive = selectedFilter === f.id;
+            const isBeauty = f.id === 'beauty';
+
             return (
               <button
                 key={f.id}
                 onClick={() => setSelectedFilter(f.id)}
                 type="button"
-                className={`flex-1 py-1 px-2.5 rounded-full text-[11px] font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-1.5 px-3 rounded-full text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer ${
                   isActive
-                    ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md scale-102'
+                    ? isBeauty
+                      ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md shadow-rose-950/50 scale-[1.02]'
+                      : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-950/50 scale-[1.02]'
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
                 }`}
               >
-                {/* Visual filter pill indicator */}
-                <span
-                  className={`w-2 h-2 rounded-full border border-white/40 ${
-                    f.id === 'original'
-                      ? 'bg-sky-400'
-                      : f.id === 'bw'
-                      ? 'bg-zinc-200'
-                      : 'bg-amber-400'
-                  }`}
-                />
+                <span>{isBeauty ? '✨' : '🌟'}</span>
                 <span>{f.label}</span>
               </button>
             );

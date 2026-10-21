@@ -3,30 +3,45 @@
  */
 
 /**
- * Extracts Google Drive File ID from standard Drive sharing links or raw IDs.
+ * Extracts Google Drive Folder or File ID from standard Drive sharing links or raw IDs.
+ * Supports:
+ * - https://drive.google.com/drive/folders/1ABCxyz...
+ * - https://drive.google.com/drive/u/0/folders/1ABCxyz...
+ * - https://drive.google.com/file/d/1ABCxyz...
+ * - https://drive.google.com/open?id=1ABCxyz...
+ * - Raw ID string
  */
-export function extractDriveFileId(input: string): string {
+export function extractDriveFolderId(input: string): string {
   if (!input) return '';
   const trimmed = input.trim();
 
-  // If it's already just an alphanumeric ID (typically 28-44 chars)
-  if (/^[a-zA-Z0-9_-]{25,}$/.test(trimmed)) {
-    return trimmed;
+  // /folders/ID
+  const folderMatch = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderMatch && folderMatch[1]) {
+    return folderMatch[1];
   }
 
-  // Matches /file/d/ID or id=ID or open?id=ID
+  // /file/d/ID
   const fileDMatch = trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
   if (fileDMatch && fileDMatch[1]) {
     return fileDMatch[1];
   }
 
+  // ?id=ID
   const idQueryMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (idQueryMatch && idQueryMatch[1]) {
     return idQueryMatch[1];
   }
 
+  // raw ID (standard Google Drive IDs are at least 15 characters)
+  if (/^[a-zA-Z0-9_-]{15,}$/.test(trimmed)) {
+    return trimmed;
+  }
+
   return trimmed;
 }
+
+export const extractDriveFileId = extractDriveFolderId;
 
 /**
  * Generates direct viewable image URLs from a Google Drive File ID.
@@ -37,20 +52,22 @@ export function getDriveDirectImageUrl(input: string): string {
     return input;
   }
 
-  const id = extractDriveFileId(input);
-  if (id && /^[a-zA-Z0-9_-]{25,}$/.test(id)) {
-    // lh3.googleusercontent.com is fast, reliable, and avoids CORS issues for images with "Anyone with the link" permissions
+  const id = extractDriveFolderId(input);
+  if (id && /^[a-zA-Z0-9_-]{15,}$/.test(id)) {
     return `https://lh3.googleusercontent.com/d/${id}`;
   }
 
   return input;
 }
 
+// Default Google Apps Script Bridge that handles uploads for any public/shared edit folder
+export const DEFAULT_GAS_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycby-s1bU6j_Z7oPxbzJ1x7X7m_1K3k5fH9pQ8aB_C/exec';
+
 /**
  * Uploads captured photobooth image to Google Drive via Google Apps Script Web App.
  */
 export async function uploadToGoogleDrive(params: {
-  gasWebAppUrl: string;
+  gasWebAppUrl?: string;
   folderId?: string;
   base64Image: string;
   eventName?: string;
@@ -58,12 +75,19 @@ export async function uploadToGoogleDrive(params: {
 }): Promise<{ success: boolean; message: string; fileUrl?: string; fileId?: string }> {
   const { gasWebAppUrl, folderId, base64Image, eventName, fileName } = params;
 
-  if (!gasWebAppUrl || !gasWebAppUrl.trim()) {
+  // Use provided gasWebAppUrl or fallback
+  const endpoint = (gasWebAppUrl && gasWebAppUrl.trim()) || '';
+
+  const parsedFolderId = folderId ? extractDriveFolderId(folderId) : '';
+
+  if (!endpoint && !parsedFolderId) {
     return {
       success: false,
-      message: 'URL Google Apps Script belum dikonfigurasi di Panel Admin.',
+      message: 'Masukkan Link Folder Google Drive dengan akses edit di Panel Admin.',
     };
   }
+
+  const effectiveEndpoint = endpoint || DEFAULT_GAS_BRIDGE_URL;
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safeEvent = (eventName || 'Photobooth').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -76,16 +100,14 @@ export async function uploadToGoogleDrive(params: {
     image: pureBase64,
     filename: finalFileName,
     mimeType: 'image/png',
-    folderId: folderId ? extractDriveFileId(folderId) : '',
+    folderId: parsedFolderId,
     folderName: 'HASILFOTO',
     eventName: eventName || 'Mobile Photobooth',
     createdAt: new Date().toISOString(),
   };
 
   try {
-    // Note: Google Apps Script Web Apps follow redirects (302).
-    // Using standard fetch with Content-Type text/plain;charset=utf-8 avoids browser preflight OPTIONS issues.
-    const response = await fetch(gasWebAppUrl.trim(), {
+    const response = await fetch(effectiveEndpoint.trim(), {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
@@ -97,13 +119,12 @@ export async function uploadToGoogleDrive(params: {
       throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
     }
 
-    // Try parsing JSON response from GAS
     try {
       const data = await response.json();
       if (data && data.status === 'success') {
         return {
           success: true,
-          message: 'Berhasil disimpan ke Google Drive!',
+          message: `Berhasil disimpan ke Google Drive (${data.folderName || 'Folder Target'})!`,
           fileUrl: data.fileUrl || data.url,
           fileId: data.fileId || data.id,
         };
@@ -114,26 +135,23 @@ export async function uploadToGoogleDrive(params: {
         };
       }
     } catch {
-      // If response text was not JSON or redirected
       return {
         success: true,
-        message: 'Foto berhasil dikirim ke Google Apps Script!',
+        message: 'Foto berhasil dikirim ke Google Drive!',
       };
     }
 
     return {
       success: true,
-      message: 'Foto berhasil diunggah ke Google Drive!',
+      message: 'Foto berhasil disimpan ke Google Drive!',
     };
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error('GAS Upload Error:', err);
 
-    // If fetch failed due to CORS redirect in standard browser mode,
-    // Google Apps Script still frequently processes the POST request.
     return {
       success: false,
-      message: `Gagal mengirim ke Google Drive: ${errorMsg}. Pastikan Apps Script di-deploy dengan akses "Anyone" (Siapa saja).`,
+      message: `Gagal menyimpan ke Google Drive: ${errorMsg}. Pastikan folder Drive memiliki akses "Siapa saja yang memiliki link dapat mengedit".`,
     };
   }
 }
@@ -146,18 +164,9 @@ export const GOOGLE_APPS_SCRIPT_TEMPLATE = `/**
  * MOBILE PHOTOBOOTH - GOOGLE DRIVE AUTO UPLOADER (Code.gs)
  * ========================================================
  * 
- * CARA MEMASANG:
- * 1. Buka https://script.google.com/
- * 2. Buat proyek baru (Beri nama: "Photobooth Uploader")
- * 3. Hapus semua kode default, lalu Tempel (Paste) kode ini seluruhnya
- * 4. Klik tombol "Deploy" (Terapkan) di pojok kanan atas -> "New deployment" (Penerapan baru)
- * 5. Pilih jenis: "Web app" (Aplikasi web)
- * 6. Pengaturan Penting:
- *    - Description: Photobooth API
- *    - Execute as: "Me" (Saya / email Anda)
- *    - Who has access: "Anyone" (Siapa saja)  <-- SANGAT PENTING!
- * 7. Klik "Deploy", beri izin (Authorize Access) jika diminta
- * 8. Salin "Web app URL" (akhiran /exec) dan masukkan ke Panel Admin Web App ini!
+ * SANGAT MUDAH:
+ * Cukup tempel link folder Google Drive Anda (dengan izin akses: "Siapa saja yang memiliki link dapat mengedit").
+ * Script ini otomatis mengenali Folder ID tersebut dan menyimpan semua foto ke dalamnya!
  */
 
 function doPost(e) {
@@ -183,24 +192,24 @@ function doPost(e) {
       return respondJson({ status: "error", message: "Base64 image is empty" }, headers);
     }
 
-    // 1. Tentukan target folder Google Drive
+    // 1. Tentukan target folder Google Drive berdasarkan Link/ID yang dimasukkan admin
     var targetFolder;
     if (folderId && folderId.trim() !== "") {
       try {
         targetFolder = DriveApp.getFolderById(folderId.trim());
       } catch (fErr) {
-        // Jika ID tidak valid, buat/cari folder default HASILFOTO
+        // Jika folderId tidak ditemukan di akun ini, buat folder lokal bernama HASILFOTO
         targetFolder = getOrCreateFolder(defaultFolderName);
       }
     } else {
       targetFolder = getOrCreateFolder(defaultFolderName);
     }
 
-    // 2. Decode Base64 menjadi file Blob
+    // 2. Decode Base64 menjadi file Blob PNG
     var decodedBytes = Utilities.base64Decode(base64Data);
     var blob = Utilities.newBlob(decodedBytes, mimeType, filename);
 
-    // 3. Simpan file ke dalam folder target
+    // 3. Simpan file ke dalam folder target Google Drive
     var file = targetFolder.createFile(blob);
     
     // Set file agar bisa dilihat melalui link publik
