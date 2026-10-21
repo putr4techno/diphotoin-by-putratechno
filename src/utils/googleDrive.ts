@@ -119,7 +119,7 @@ export async function checkGoogleAppsScriptHealth(url: string): Promise<{ succes
 }
 
 /**
- * Uploads captured photobooth image or boomerang video to Google Drive via Google Apps Script Web App.
+ * Uploads captured photobooth image to Google Drive via Google Apps Script Web App.
  */
 export async function uploadToGoogleDrive(params: {
   gasWebAppUrl?: string;
@@ -127,11 +127,10 @@ export async function uploadToGoogleDrive(params: {
   base64Image?: string;
   base64Data?: string;
   mimeType?: string;
-  mediaType?: 'photo' | 'boomerang';
   eventName?: string;
   fileName?: string;
 }): Promise<{ success: boolean; message: string; fileUrl?: string; fileId?: string; isDirectFolder?: boolean }> {
-  const { gasWebAppUrl, folderId, base64Image, base64Data, mimeType, mediaType = 'photo', eventName, fileName } = params;
+  const { gasWebAppUrl, folderId, base64Image, base64Data, mimeType, eventName, fileName } = params;
 
   const rawData = base64Data || base64Image || '';
   const endpoint = (gasWebAppUrl && gasWebAppUrl.trim()) || '';
@@ -153,12 +152,10 @@ export async function uploadToGoogleDrive(params: {
     };
   }
 
-  const isVideo = mediaType === 'boomerang' || (mimeType && mimeType.startsWith('video/'));
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safeEvent = (eventName || 'Photobooth').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const extension = isVideo ? (mimeType?.includes('webm') ? 'webm' : 'mp4') : 'png';
-  const finalFileName = fileName || `${isVideo ? 'Boomerang' : 'Photobooth'}_${safeEvent}_${timestamp}.${extension}`;
-  const finalMimeType = mimeType || (isVideo ? 'video/mp4' : 'image/png');
+  const finalFileName = fileName || `Photobooth_${safeEvent}_${timestamp}.png`;
+  const finalMimeType = mimeType || 'image/png';
 
   // Strip data:...;base64, prefix if present
   const pureBase64 = rawData.includes(',') ? rawData.split(',')[1] : rawData;
@@ -167,7 +164,6 @@ export async function uploadToGoogleDrive(params: {
     image: pureBase64,
     filename: finalFileName,
     mimeType: finalMimeType,
-    mediaType,
     folderId: parsedFolderId,
     folderName: 'HASILFOTO',
     eventName: eventName || 'Mobile Photobooth',

@@ -5,10 +5,9 @@
 
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { AppSettings, AppView, ColorFilter, FrameConfig, CapturedMedia } from './types';
+import { AppSettings, AppView, ColorFilter, FrameConfig } from './types';
 import { loadSettings, saveSettings, resetSettings } from './utils/storage';
 import { compositePhoto } from './utils/canvasComposer';
-import { BoomerangResult } from './utils/boomerang';
 import { Header } from './components/Header';
 import { FrameSelector } from './components/FrameSelector';
 import { CameraCapture } from './components/CameraCapture';
@@ -19,7 +18,7 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [view, setView] = useState<AppView>('select-frame');
   const [selectedFrameId, setSelectedFrameId] = useState<'frame1' | 'frame2' | null>(null);
-  const [capturedMedia, setCapturedMedia] = useState<CapturedMedia | null>(null);
+  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [appliedFilter, setAppliedFilter] = useState<ColorFilter>('none'); // Default: Natural / Tanpa Efek
   const [isCompositing, setIsCompositing] = useState<boolean>(false);
   const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
@@ -49,10 +48,7 @@ export default function App() {
     setAppliedFilter(filter);
     try {
       const result = await compositePhoto(source, activeFrame, settings, mirror, filter);
-      setCapturedMedia({
-        type: 'photo',
-        photoDataUrl: result.dataUrl,
-      });
+      setPhotoDataUrl(result.dataUrl);
       setView('preview');
     } catch (err) {
       console.error('Compositing failed:', err);
@@ -62,27 +58,15 @@ export default function App() {
     }
   };
 
-  // Boomerang captured
-  const handleCapturedBoomerang = (result: BoomerangResult, filter: ColorFilter) => {
-    setAppliedFilter(filter);
-    setCapturedMedia({
-      type: 'boomerang',
-      photoDataUrl: result.posterDataUrl,
-      videoUrl: result.videoUrl,
-      videoBlob: result.videoBlob,
-    });
-    setView('preview');
-  };
-
-  // Retake photo or boomerang
+  // Retake photo
   const handleRetake = () => {
-    setCapturedMedia(null);
+    setPhotoDataUrl(null);
     setView('camera');
   };
 
   // Change frame
   const handleChangeFrame = () => {
-    setCapturedMedia(null);
+    setPhotoDataUrl(null);
     setView('select-frame');
   };
 
@@ -130,17 +114,13 @@ export default function App() {
             frame={activeFrame}
             initialFilter={appliedFilter}
             onCapturedPhoto={handleCapturedPhoto}
-            onCapturedBoomerang={handleCapturedBoomerang}
             onBack={() => setView('select-frame')}
           />
         )}
 
-        {view === 'preview' && capturedMedia && (
+        {view === 'preview' && photoDataUrl && (
           <PhotoPreview
-            photoDataUrl={capturedMedia.photoDataUrl}
-            videoUrl={capturedMedia.videoUrl}
-            videoBlob={capturedMedia.videoBlob}
-            mediaType={capturedMedia.type}
+            photoDataUrl={photoDataUrl}
             frame={activeFrame}
             settings={settings}
             appliedFilter={appliedFilter}

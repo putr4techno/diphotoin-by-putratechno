@@ -8,13 +8,12 @@ import {
   Loader2,
   Share2,
   ExternalLink,
-  Sparkles,
   Check,
   QrCode,
-  Repeat,
+  HardDrive,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { AppSettings, ColorFilter, FrameConfig, UploadStatus, CaptureMode } from '../types';
+import { AppSettings, ColorFilter, FrameConfig, UploadStatus } from '../types';
 import { uploadToGoogleDrive, extractDriveFolderId } from '../utils/googleDrive';
 import { soundEffects } from '../utils/audio';
 import { getFilterDefinition } from '../utils/filters';
@@ -22,9 +21,6 @@ import { QRCodeModal } from './QRCodeModal';
 
 interface PhotoPreviewProps {
   photoDataUrl: string;
-  videoUrl?: string;
-  videoBlob?: Blob;
-  mediaType?: CaptureMode;
   frame: FrameConfig;
   settings: AppSettings;
   appliedFilter?: ColorFilter;
@@ -35,9 +31,6 @@ interface PhotoPreviewProps {
 
 export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
   photoDataUrl,
-  videoUrl,
-  videoBlob,
-  mediaType = 'photo',
   frame,
   settings,
   appliedFilter = 'none',
@@ -49,14 +42,16 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
     state: 'idle',
     message: '',
   });
+  const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [isSharing, setIsSharing] = useState<boolean>(false);
   const [shareToast, setShareToast] = useState<string | null>(null);
   const [isQrModalOpen, setIsQrModalOpen] = useState<boolean>(false);
 
   const filterDef = getFilterDefinition(appliedFilter);
-  const isBoomerang = mediaType === 'boomerang';
+  const parsedFolderId = settings.driveFolderId ? extractDriveFolderId(settings.driveFolderId) : '';
+  const hasDriveConfig = !!parsedFolderId || !!(settings.gasWebAppUrl && settings.gasWebAppUrl.trim());
 
-  // Launch celebration confetti and sound
+  // Launch celebration confetti and sound on preview screen load
   useEffect(() => {
     soundEffects.playSuccess();
     try {
@@ -71,119 +66,82 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
     }
   }, []);
 
-  // Helper to convert Blob to Base64
-  const blobToBase64 = (blob: Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        resolve(reader.result as string);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
+  // Trigger Google Drive upload helper
+  const performDriveUpload = async (): Promise<boolean> => {
+    if (!hasDriveConfig) {
+      setUploadStatus({
+        state: 'idle',
+        message: 'Link Google Drive belum diisi di Panel Admin',
+      });
+      return false;
+    }
+
+    setUploadStatus({
+      state: 'uploading',
+      message: 'Menyimpan foto ke folder Google Drive...',
     });
-  };
 
-  // Auto-upload in background to Google Drive for Photo or Boomerang Video
-  useEffect(() => {
-    let isMounted = true;
-
-    const performUpload = async () => {
-      const folderId = settings.driveFolderId ? extractDriveFolderId(settings.driveFolderId) : '';
-      if (!folderId && (!settings.gasWebAppUrl || !settings.gasWebAppUrl.trim())) {
-        if (isMounted) {
-          setUploadStatus({
-            state: 'idle',
-            message: 'Folder Google Drive belum diatur di Admin',
-          });
-        }
-        return;
-      }
-
-      // If Google Apps Script Web App URL is provided
+    try {
+      // If GAS Web App URL is provided
       if (settings.gasWebAppUrl && settings.gasWebAppUrl.trim()) {
-        if (isMounted) {
+        const result = await uploadToGoogleDrive({
+          gasWebAppUrl: settings.gasWebAppUrl,
+          folderId: settings.driveFolderId,
+          base64Data: photoDataUrl,
+          mimeType: 'image/png',
+          eventName: settings.eventName,
+        });
+
+        if (result.success) {
           setUploadStatus({
-            state: 'uploading',
-            message: isBoomerang ? 'Menyimpan video boomerang ke Google Drive...' : 'Menyimpan foto ke Google Drive...',
+            state: 'success',
+            message: 'Foto berhasil tersimpan di Google Drive!',
+            fileUrl: result.fileUrl,
+            fileId: result.fileId,
           });
-        }
-
-        try {
-          let base64Payload = photoDataUrl;
-          let mimeType = 'image/png';
-
-          if (isBoomerang && videoBlob) {
-            base64Payload = await blobToBase64(videoBlob);
-            mimeType = videoBlob.type || 'video/mp4';
-          }
-
-          const result = await uploadToGoogleDrive({
-            gasWebAppUrl: settings.gasWebAppUrl,
-            folderId: settings.driveFolderId,
-            base64Data: base64Payload,
-            mimeType,
-            mediaType,
-            eventName: settings.eventName,
+          return true;
+        } else {
+          setUploadStatus({
+            state: 'error',
+            message: result.message || 'Gagal menyimpan ke Google Drive.',
           });
-
-          if (isMounted) {
-            if (result.success) {
-              setUploadStatus({
-                state: 'success',
-                message: isBoomerang ? 'Video Boomerang tersimpan di Drive!' : 'Tersimpan ke Google Drive!',
-                fileUrl: result.fileUrl,
-                fileId: result.fileId,
-              });
-              return;
-            } else {
-              setUploadStatus({
-                state: 'error',
-                message: result.message,
-              });
-              return;
-            }
-          }
-        } catch (uploadErr) {
-          console.warn('Auto upload failed:', uploadErr);
+          return false;
         }
       }
 
-      // If direct folder link is configured without GAS URL
-      if (isMounted && folderId) {
+      // If direct folder link is provided without GAS URL
+      if (parsedFolderId) {
         setUploadStatus({
           state: 'success',
-          message: 'Folder Google Drive Terhubung!',
-          fileUrl: `https://drive.google.com/drive/folders/${folderId}`,
-          fileId: folderId,
+          message: 'Foto siap diakses pada folder Google Drive!',
+          fileUrl: `https://drive.google.com/drive/folders/${parsedFolderId}`,
+          fileId: parsedFolderId,
         });
+        return true;
       }
-    };
 
-    performUpload();
+      return false;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadStatus({
+        state: 'error',
+        message: `Gagal upload ke Drive: ${msg}`,
+      });
+      return false;
+    }
+  };
 
-    return () => {
-      isMounted = false;
-    };
-  }, [isBoomerang, mediaType, photoDataUrl, settings.driveFolderId, settings.eventName, settings.gasWebAppUrl, videoBlob]);
+  // Download photo to local device & automatically upload to Google Drive upon download click
+  const handleDownload = async () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
 
-  // Download photo or video to local device
-  const handleDownload = () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const safeBrand = (settings.brandName || 'Photobooth').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `${safeBrand}_${timestamp}.png`;
 
-    if (isBoomerang && videoUrl) {
-      const ext = videoBlob?.type.includes('webm') ? 'webm' : 'mp4';
-      const filename = `${safeBrand}_Boomerang_${timestamp}.${ext}`;
-      const a = document.createElement('a');
-      a.href = videoUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setShareToast('Video Boomerang diunduh ke galeri! 📥');
-      setTimeout(() => setShareToast(null), 3000);
-    } else {
-      const filename = `${safeBrand}_${timestamp}.png`;
+    // 1. Trigger local download immediately
+    try {
       const a = document.createElement('a');
       a.href = photoDataUrl;
       a.download = filename;
@@ -192,10 +150,24 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
       document.body.removeChild(a);
       setShareToast('Foto diunduh ke galeri! 📥');
       setTimeout(() => setShareToast(null), 3000);
+    } catch (err) {
+      console.warn('Local download trigger warning:', err);
     }
+
+    // 2. Automatically upload to Google Drive target link
+    if (hasDriveConfig) {
+      await performDriveUpload();
+    } else {
+      setUploadStatus({
+        state: 'idle',
+        message: 'Foto diunduh ke HP. Link Drive belum diisi di Admin.',
+      });
+    }
+
+    setIsDownloading(false);
   };
 
-  // Native Web Share API (share video or image file directly)
+  // Native Web Share API (share image file or Drive link directly)
   const handleNativeShare = async () => {
     if (isSharing) return;
     setIsSharing(true);
@@ -203,26 +175,16 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const safeBrand = (settings.brandName || 'Photobooth').replace(/[^a-zA-Z0-9_-]/g, '_');
-      const shareText = isBoomerang
-        ? `Video Boomerang photobooth di ${settings.eventName || settings.brandName}! 🔄✨`
-        : `Selfie photobooth di ${settings.eventName || settings.brandName}! 📸✨`;
+      const shareText = `Selfie photobooth di ${settings.eventName || settings.brandName}! 📸✨`;
       const shareTitle = settings.eventName || `${settings.brandName} Photobooth`;
 
-      let fileToShare: File | null = null;
-
-      if (isBoomerang && videoBlob) {
-        const ext = videoBlob.type.includes('webm') ? 'webm' : 'mp4';
-        const filename = `${safeBrand}_Boomerang_${timestamp}.${ext}`;
-        fileToShare = new File([videoBlob], filename, { type: videoBlob.type || 'video/mp4' });
-      } else {
-        const res = await fetch(photoDataUrl);
-        const blob = await res.blob();
-        const filename = `${safeBrand}_${timestamp}.png`;
-        fileToShare = new File([blob], filename, { type: 'image/png' });
-      }
+      const res = await fetch(photoDataUrl);
+      const blob = await res.blob();
+      const filename = `${safeBrand}_${timestamp}.png`;
+      const fileToShare = new File([blob], filename, { type: 'image/png' });
 
       // 1. Try sharing actual file via Web Share API
-      if (fileToShare && navigator.canShare && navigator.canShare({ files: [fileToShare] })) {
+      if (navigator.canShare && navigator.canShare({ files: [fileToShare] })) {
         await navigator.share({
           title: shareTitle,
           text: shareText,
@@ -258,65 +220,19 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
     }
   };
 
-  const handleRetryUpload = async () => {
-    setUploadStatus({
-      state: 'uploading',
-      message: 'Mencoba kembali menyimpan ke Google Drive...',
-    });
-
-    try {
-      let base64Payload = photoDataUrl;
-      let mimeType = 'image/png';
-
-      if (isBoomerang && videoBlob) {
-        base64Payload = await blobToBase64(videoBlob);
-        mimeType = videoBlob.type || 'video/mp4';
-      }
-
-      const result = await uploadToGoogleDrive({
-        gasWebAppUrl: settings.gasWebAppUrl,
-        folderId: settings.driveFolderId,
-        base64Data: base64Payload,
-        mimeType,
-        mediaType,
-        eventName: settings.eventName,
-      });
-
-      if (result.success) {
-        setUploadStatus({
-          state: 'success',
-          message: isBoomerang ? 'Video Boomerang tersimpan di Drive!' : 'Tersimpan ke Google Drive!',
-          fileUrl: result.fileUrl,
-          fileId: result.fileId,
-        });
-      } else {
-        setUploadStatus({
-          state: 'error',
-          message: result.message,
-        });
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setUploadStatus({
-        state: 'error',
-        message: `Gagal: ${msg}`,
-      });
-    }
-  };
-
   return (
     <div className="flex-1 flex flex-col justify-between max-w-md w-full mx-auto px-4 pb-4 pt-1 select-none">
-      {/* Auto-upload Status Bar */}
+      {/* Google Drive Status Bar */}
       <div className="w-full mb-2">
         {uploadStatus.state === 'uploading' && (
-          <div className="flex items-center justify-center gap-2 py-1.5 px-3 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs font-medium">
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+          <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs font-medium animate-pulse">
+            <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
             <span className="truncate">{uploadStatus.message}</span>
           </div>
         )}
 
         {uploadStatus.state === 'success' && (
-          <div className="flex items-center justify-between py-1.5 px-3 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold">
+          <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold">
             <div className="flex items-center gap-1.5 truncate">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               <span className="truncate">{uploadStatus.message}</span>
@@ -325,7 +241,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
               <button
                 onClick={() => setIsQrModalOpen(true)}
                 type="button"
-                className="flex items-center gap-1 text-[11px] text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 px-2 py-0.5 rounded-md font-semibold transition-colors"
+                className="flex items-center gap-1 text-[11px] text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 px-2 py-0.5 rounded-md font-semibold transition-colors cursor-pointer"
                 title="Tampilkan QR Code Drive"
               >
                 <QrCode className="w-3 h-3" />
@@ -336,7 +252,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
                   href={uploadStatus.fileUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex items-center gap-1 text-[11px] text-emerald-400 underline font-bold"
+                  className="flex items-center gap-1 text-[11px] text-emerald-400 underline font-bold cursor-pointer"
                 >
                   <span>Buka Drive</span>
                   <ExternalLink className="w-3 h-3" />
@@ -347,67 +263,55 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
         )}
 
         {uploadStatus.state === 'error' && (
-          <div className="flex items-center justify-between py-1.5 px-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-medium gap-2">
+          <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-medium gap-2">
             <div className="flex items-center gap-1.5 truncate">
               <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
               <span className="truncate text-[11px]">{uploadStatus.message}</span>
             </div>
             <button
-              onClick={handleRetryUpload}
-              className="text-[11px] font-bold text-amber-300 underline shrink-0 hover:text-white"
+              onClick={performDriveUpload}
+              className="text-[11px] font-bold text-amber-300 underline shrink-0 hover:text-white cursor-pointer"
             >
               Coba Lagi
             </button>
           </div>
         )}
 
-        {uploadStatus.state === 'idle' && !settings.driveFolderId && (
-          <div className="flex items-center justify-between py-1.5 px-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs">
+        {uploadStatus.state === 'idle' && (
+          <div className="flex items-center justify-between py-1.5 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs">
             <div className="flex items-center gap-1.5 truncate">
-              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="truncate">Link Google Drive belum diatur di Admin</span>
+              <HardDrive className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              <span className="truncate text-[11px]">
+                {hasDriveConfig
+                  ? 'Tekan "Unduh Foto" untuk unduh ke HP & upload ke Google Drive'
+                  : 'Link Google Drive belum diisi di Admin'}
+              </span>
             </div>
-            <button
-              onClick={onOpenAdmin}
-              className="text-amber-300 hover:text-white font-bold underline shrink-0 ml-2"
-            >
-              Atur Drive
-            </button>
+            {!hasDriveConfig && (
+              <button
+                onClick={onOpenAdmin}
+                className="text-rose-400 hover:text-rose-300 font-bold underline shrink-0 ml-2 text-[11px] cursor-pointer"
+              >
+                Atur Drive
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      {/* Finished Media Preview Card: Adaptive to native phone ratio */}
+      {/* Finished Photo Preview Card: Adaptive to native phone ratio */}
       <div className="relative w-full max-w-sm max-h-[66dvh] mx-auto rounded-3xl overflow-hidden bg-zinc-950 border-2 border-zinc-800 shadow-2xl flex items-center justify-center my-auto aspect-auto min-h-[360px]">
-        {isBoomerang && videoUrl ? (
-          <video
-            src={videoUrl}
-            autoPlay
-            loop
-            muted
-            playsInline
-            className="w-full h-full object-contain"
-          />
-        ) : (
-          <img
-            src={photoDataUrl}
-            alt="Hasil Photobooth"
-            className="w-full h-full object-contain"
-          />
-        )}
+        <img
+          src={photoDataUrl}
+          alt="Hasil Photobooth"
+          className="w-full h-full object-contain"
+        />
 
-        {/* Frame, Boomerang, and Filter Badges */}
+        {/* Frame & Filter Badges */}
         <div className="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-1.5">
           <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md text-white border border-white/10 uppercase tracking-wider">
             {frame.name}
           </span>
-
-          {isBoomerang && (
-            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-500 to-rose-500 backdrop-blur-md text-white border border-amber-300/30 flex items-center gap-1 shadow-md">
-              <Repeat className="w-2.5 h-2.5" />
-              <span>Boomerang</span>
-            </span>
-          )}
 
           {filterDef && (
             <span
@@ -426,14 +330,16 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
         </div>
 
         {/* Floating Quick QR Button */}
-        <button
-          onClick={() => setIsQrModalOpen(true)}
-          type="button"
-          className="absolute top-3 right-3 z-10 p-2 rounded-full bg-black/70 backdrop-blur-md border border-white/20 text-white hover:text-rose-400 active:scale-95 transition-all shadow-md"
-          title="Buka QR Code"
-        >
-          <QrCode className="w-4 h-4" />
-        </button>
+        {uploadStatus.fileUrl && (
+          <button
+            onClick={() => setIsQrModalOpen(true)}
+            type="button"
+            className="absolute top-3 right-3 z-10 p-2 rounded-full bg-black/70 backdrop-blur-md border border-white/20 text-white hover:text-rose-400 active:scale-95 transition-all shadow-md cursor-pointer"
+            title="Buka QR Code Drive"
+          >
+            <QrCode className="w-4 h-4" />
+          </button>
+        )}
 
         {/* Share Toast Notification Badge */}
         {shareToast && (
@@ -446,24 +352,34 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
         )}
       </div>
 
-      {/* Action Buttons: Download, Native Share, QR Code, Retake, Change Frame */}
+      {/* Action Buttons: Unduh Foto (Downloads & Uploads to Drive), Share, QR Code, Retake, Change Frame */}
       <div className="w-full flex flex-col gap-2 mt-auto pt-2">
-        {/* Main Actions: Unduh & Bagikan */}
+        {/* Main Actions: Unduh Foto & Bagikan */}
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={handleDownload}
+            disabled={isDownloading}
             type="button"
-            className="w-full py-3 px-3 rounded-2xl bg-zinc-850 hover:bg-zinc-800 active:scale-[0.98] text-zinc-100 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 border border-zinc-700 shadow-md transition-all"
+            className="w-full py-3 px-3 rounded-2xl bg-zinc-850 hover:bg-zinc-800 active:scale-[0.98] text-zinc-100 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 border border-zinc-700 shadow-md transition-all cursor-pointer disabled:opacity-75"
           >
-            <Download className="w-4 h-4 text-zinc-300" />
-            <span>{isBoomerang ? 'Unduh Boomerang' : 'Unduh Foto'}</span>
+            {isDownloading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-rose-400" />
+                <span>Menyimpan...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4 text-zinc-300" />
+                <span>Unduh Foto</span>
+              </>
+            )}
           </button>
 
           <button
             onClick={handleNativeShare}
             disabled={isSharing}
             type="button"
-            className="w-full py-3 px-3 rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 hover:brightness-110 active:scale-[0.98] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-950/40 transition-all disabled:opacity-75"
+            className="w-full py-3 px-3 rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 hover:brightness-110 active:scale-[0.98] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-950/40 transition-all disabled:opacity-75 cursor-pointer"
           >
             {isSharing ? (
               <>
@@ -473,7 +389,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
             ) : (
               <>
                 <Share2 className="w-4 h-4 text-white" />
-                <span>Bagikan {isBoomerang ? 'Video' : 'Foto'}</span>
+                <span>Bagikan Foto</span>
               </>
             )}
           </button>
@@ -483,7 +399,7 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
         <button
           onClick={() => setIsQrModalOpen(true)}
           type="button"
-          className="w-full py-2.5 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-850 active:scale-[0.98] text-zinc-200 font-bold text-xs flex items-center justify-center gap-2 border border-zinc-800 shadow-sm transition-all"
+          className="w-full py-2.5 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-850 active:scale-[0.98] text-zinc-200 font-bold text-xs flex items-center justify-center gap-2 border border-zinc-800 shadow-sm transition-all cursor-pointer"
         >
           <QrCode className="w-4 h-4 text-rose-400" />
           <span>Scan QR Code untuk Unduh di Perangkat Lain</span>
@@ -494,16 +410,16 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
           <button
             onClick={onRetake}
             type="button"
-            className="w-full py-2 px-3 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 active:scale-[0.98] text-zinc-300 font-semibold text-xs flex items-center justify-center gap-1.5 border border-zinc-800 transition-all"
+            className="w-full py-2 px-3 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 active:scale-[0.98] text-zinc-300 font-semibold text-xs flex items-center justify-center gap-1.5 border border-zinc-800 transition-all cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>Ulangi Pengambilan</span>
+            <span>Foto Ulang</span>
           </button>
 
           <button
             onClick={onChangeFrame}
             type="button"
-            className="w-full py-2 px-3 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 active:scale-[0.98] text-zinc-300 font-semibold text-xs flex items-center justify-center gap-1.5 border border-zinc-800 transition-all"
+            className="w-full py-2 px-3 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 active:scale-[0.98] text-zinc-300 font-semibold text-xs flex items-center justify-center gap-1.5 border border-zinc-800 transition-all cursor-pointer"
           >
             <LayoutGrid className="w-3.5 h-3.5" />
             <span>Ganti Frame</span>

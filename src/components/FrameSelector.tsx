@@ -206,12 +206,12 @@ export const FrameSelector: React.FC<FrameSelectorProps> = ({
           }`}
         >
           <Camera className="w-5 h-5" />
-          <span>{selectedFrameId ? 'Mulai Foto Sekarang' : 'Pilih Salah Satu Frame di Atas'}</span>
+          <span>{selectedFrameId ? 'Buka Kamera & Pose' : 'Pilih Salah Satu Frame di Atas'}</span>
         </button>
 
         <div className="flex items-center justify-center gap-1.5 text-zinc-400 text-[11px]">
           <HelpCircle className="w-3.5 h-3.5 text-rose-400" />
-          <span>Kamera otomatis aktif dengan timer 5 detik</span>
+          <span>Atur gaya di live preview, lalu tekan tombol untuk mulai hitung mundur 5 detik</span>
         </div>
       </div>
     </div>

@@ -1,18 +1,15 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { RefreshCw, FlipHorizontal, ArrowLeft, AlertCircle, Upload, Zap, Sparkles, Repeat } from 'lucide-react';
-import { AppSettings, CaptureMode, ColorFilter, FrameConfig } from '../types';
+import { RefreshCw, FlipHorizontal, ArrowLeft, AlertCircle, Upload, Camera, X } from 'lucide-react';
+import { AppSettings, ColorFilter, FrameConfig } from '../types';
 import { FrameOverlayVisual } from './DefaultFrames';
 import { soundEffects } from '../utils/audio';
 import { COLOR_FILTERS, getFilterDefinition } from '../utils/filters';
-import { captureBoomerangFrames, createBoomerangVideo, BoomerangResult } from '../utils/boomerang';
 
 interface CameraCaptureProps {
   settings: AppSettings;
   frame: FrameConfig;
   initialFilter?: ColorFilter;
-  initialMode?: CaptureMode;
   onCapturedPhoto: (source: HTMLVideoElement | HTMLImageElement, mirror: boolean, filter: ColorFilter) => void;
-  onCapturedBoomerang: (result: BoomerangResult, filter: ColorFilter) => void;
   onBack: () => void;
 }
 
@@ -20,15 +17,13 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
   settings,
   frame,
   initialFilter = 'none',
-  initialMode = 'photo',
   onCapturedPhoto,
-  onCapturedBoomerang,
   onBack,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const countdownIntervalRef = useRef<number | null>(null);
 
-  const [captureMode, setCaptureMode] = useState<CaptureMode>(initialMode);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [isMirror, setIsMirror] = useState<boolean>(settings.mirrorDefault);
   const [selectedFilter, setSelectedFilter] = useState<ColorFilter>(initialFilter);
@@ -38,11 +33,6 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
   const [isLoadingCamera, setIsLoadingCamera] = useState<boolean>(true);
   const [streamAspectRatio, setStreamAspectRatio] = useState<number | null>(null);
 
-  // Boomerang recording progress state
-  const [isRecordingBoomerang, setIsRecordingBoomerang] = useState<boolean>(false);
-  const [boomerangProgress, setBoomerangProgress] = useState<number>(0);
-  const [isProcessingBoomerang, setIsProcessingBoomerang] = useState<boolean>(false);
-
   // Stop camera helper
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -51,7 +41,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
     }
   }, []);
 
-  // Detect native stream aspect ratio on metadata load
+  // Detect native stream aspect ratio on metadata load (adapts to device)
   const handleVideoMetadata = () => {
     if (videoRef.current && videoRef.current.videoWidth && videoRef.current.videoHeight) {
       const ratio = videoRef.current.videoWidth / videoRef.current.videoHeight;
@@ -70,7 +60,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
         throw new Error('Perangkat ini tidak mendukung akses kamera langsung (MediaDevices API tidak tersedia).');
       }
 
-      // Native resolution constraints: allows each phone to use its own native aspect ratio
+      // Native resolution constraints: allows each phone to use its own native camera ratio
       const constraints: MediaStreamConstraints = {
         audio: false,
         video: {
@@ -116,46 +106,18 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
     }
   }, [facingMode, stopCamera]);
 
-  // Boomerang recording execution
-  const executeBoomerangCapture = useCallback(async () => {
-    if (!videoRef.current) return;
-    setIsRecordingBoomerang(true);
-    setBoomerangProgress(0);
-
-    try {
-      soundEffects.playShutter();
-      const frames = await captureBoomerangFrames(videoRef.current, {
-        durationMs: 1500,
-        fps: 20,
-        onProgress: (p) => setBoomerangProgress(p),
-      });
-
-      setIsRecordingBoomerang(false);
-      setIsProcessingBoomerang(true);
-
-      const result = await createBoomerangVideo(frames, {
-        frame,
-        settings,
-        mirror: isMirror && facingMode === 'user',
-        colorFilter: selectedFilter,
-        loops: 2,
-        fps: 24,
-      });
-
-      onCapturedBoomerang(result, selectedFilter);
-    } catch (err) {
-      console.error('Boomerang Capture Failed:', err);
-      alert('Gagal merekam Boomerang. Silakan coba kembali.');
-    } finally {
-      setIsRecordingBoomerang(false);
-      setIsProcessingBoomerang(false);
-      setCountdown(null);
+  // Cancel running countdown if user wants to change pose
+  const handleCancelCountdown = useCallback(() => {
+    if (countdownIntervalRef.current !== null) {
+      window.clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
     }
-  }, [facingMode, frame, isMirror, onCapturedBoomerang, selectedFilter, settings]);
+    setCountdown(null);
+  }, []);
 
-  // Handle countdown & capture
+  // Handle countdown & manual capture trigger
   const triggerCapture = useCallback(() => {
-    if (countdown !== null || isRecordingBoomerang || isProcessingBoomerang) return;
+    if (countdown !== null || isLoadingCamera || !!cameraError) return;
 
     let currentCount = settings.countdownSeconds || 5;
     setCountdown(currentCount);
@@ -168,35 +130,31 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
         soundEffects.playTick();
       } else {
         window.clearInterval(intervalId);
+        countdownIntervalRef.current = null;
         setCountdown(0);
         soundEffects.playFinalTick();
 
-        if (captureMode === 'boomerang') {
-          setCountdown(null);
-          executeBoomerangCapture();
-        } else {
-          // Standard photo capture
-          soundEffects.playShutter();
-          setIsFlashing(true);
+        // Shutter sound & flash
+        soundEffects.playShutter();
+        setIsFlashing(true);
 
-          setTimeout(() => {
-            if (videoRef.current) {
-              onCapturedPhoto(videoRef.current, isMirror && facingMode === 'user', selectedFilter);
-            }
-            setIsFlashing(false);
-            setCountdown(null);
-          }, 150);
-        }
+        setTimeout(() => {
+          if (videoRef.current) {
+            onCapturedPhoto(videoRef.current, isMirror && facingMode === 'user', selectedFilter);
+          }
+          setIsFlashing(false);
+          setCountdown(null);
+        }, 150);
       }
     }, 1000);
+
+    countdownIntervalRef.current = intervalId;
   }, [
-    captureMode,
+    cameraError,
     countdown,
-    executeBoomerangCapture,
     facingMode,
+    isLoadingCamera,
     isMirror,
-    isProcessingBoomerang,
-    isRecordingBoomerang,
     onCapturedPhoto,
     selectedFilter,
     settings.countdownSeconds,
@@ -207,21 +165,15 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
     startCamera();
     return () => {
       stopCamera();
+      if (countdownIntervalRef.current !== null) {
+        window.clearInterval(countdownIntervalRef.current);
+      }
     };
   }, [startCamera, stopCamera]);
 
-  // Auto trigger countdown when camera starts
-  useEffect(() => {
-    if (!isLoadingCamera && !cameraError && countdown === null && !isRecordingBoomerang && !isProcessingBoomerang) {
-      const timer = setTimeout(() => {
-        triggerCapture();
-      }, 700);
-      return () => clearTimeout(timer);
-    }
-  }, [isLoadingCamera, cameraError, triggerCapture, isRecordingBoomerang, isProcessingBoomerang]);
-
   // Flip front/rear camera
   const toggleFacingMode = () => {
+    if (countdown !== null) handleCancelCountdown();
     setFacingMode((prev) => {
       const next = prev === 'user' ? 'environment' : 'user';
       setIsMirror(next === 'user');
@@ -252,39 +204,21 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
       {/* Top Bar Navigation & Controls */}
       <div className="flex items-center justify-between py-1 px-1 z-20">
         <button
-          onClick={onBack}
+          onClick={() => {
+            handleCancelCountdown();
+            onBack();
+          }}
           type="button"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-900/90 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold active:scale-95 transition-all shadow-md"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-900/90 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold active:scale-95 transition-all shadow-md cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>Kembali</span>
         </button>
 
-        {/* Mode Switcher: Foto vs Boomerang */}
-        <div className="flex items-center p-0.5 rounded-full bg-zinc-900/90 border border-zinc-800 backdrop-blur-md shadow-md">
-          <button
-            type="button"
-            onClick={() => setCaptureMode('photo')}
-            className={`py-1 px-3 rounded-full text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
-              captureMode === 'photo'
-                ? 'bg-rose-500 text-white shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <span>📸 Foto</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setCaptureMode('boomerang')}
-            className={`py-1 px-3 rounded-full text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
-              captureMode === 'boomerang'
-                ? 'bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <Repeat className="w-3 h-3" />
-            <span>Boomerang</span>
-          </button>
+        {/* Viewfinder Status / Badge */}
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900/80 border border-zinc-800 text-[11px] text-zinc-300 font-semibold shadow-sm">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>Live Preview Kamera</span>
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -293,10 +227,10 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
             <button
               onClick={() => setIsMirror(!isMirror)}
               type="button"
-              className={`p-2 rounded-full border transition-all text-xs font-medium flex items-center justify-center ${
+              className={`p-2 rounded-full border transition-all text-xs font-medium flex items-center justify-center cursor-pointer ${
                 isMirror
                   ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-                  : 'bg-zinc-900/90 border-zinc-800 text-zinc-400'
+                  : 'bg-zinc-900/90 border-zinc-800 text-zinc-400 hover:text-zinc-200'
               }`}
               title="Cermin (Mirror Selfie)"
             >
@@ -308,7 +242,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
           <button
             onClick={toggleFacingMode}
             type="button"
-            className="p-2 rounded-full bg-zinc-900/90 border border-zinc-800 text-zinc-300 hover:text-white transition-all active:scale-95"
+            className="p-2 rounded-full bg-zinc-900/90 border border-zinc-800 text-zinc-300 hover:text-white transition-all active:scale-95 cursor-pointer"
             title="Ganti Kamera Depan/Belakang"
           >
             <RefreshCw className="w-4 h-4" />
@@ -341,7 +275,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
             <div className="flex flex-col gap-2 w-full mt-2">
               <button
                 onClick={startCamera}
-                className="w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all"
+                className="w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all cursor-pointer"
               >
                 Coba Akses Kamera Lagi
               </button>
@@ -382,39 +316,22 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
 
         {/* Big Countdown Timer Overlay (5 to 1) */}
         {countdown !== null && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 backdrop-blur-[2px] pointer-events-none">
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px]">
             <div className="relative flex items-center justify-center animate-ping duration-700">
-              <span className="text-8xl sm:text-9xl font-black text-white drop-shadow-[0_10px_20px_rgba(0,0,0,0.8)] font-mono">
-                {countdown > 0 ? countdown : captureMode === 'boomerang' ? '🔄' : '📸'}
+              <span className="text-8xl sm:text-9xl font-black text-white drop-shadow-[0_10px_25px_rgba(0,0,0,0.9)] font-mono">
+                {countdown > 0 ? countdown : '📸'}
               </span>
             </div>
-          </div>
-        )}
-
-        {/* Boomerang Recording Progress Overlay */}
-        {isRecordingBoomerang && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[1px] pointer-events-none p-4">
-            <div className="p-4 rounded-2xl bg-zinc-900/90 border border-amber-500/40 text-center flex flex-col items-center gap-2 shadow-2xl">
-              <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
-                <div className="w-3 h-3 rounded-full bg-red-500 animate-ping"></div>
-                <span>Merekam Boomerang...</span>
-              </div>
-              <div className="w-40 h-2 bg-zinc-800 rounded-full overflow-hidden border border-zinc-700">
-                <div
-                  className="h-full bg-gradient-to-r from-amber-400 to-rose-500 transition-all duration-75"
-                  style={{ width: `${boomerangProgress}%` }}
-                ></div>
-              </div>
-              <span className="text-[10px] text-zinc-300 font-mono">{boomerangProgress}%</span>
-            </div>
-          </div>
-        )}
-
-        {/* Boomerang Encoding Loader */}
-        {isProcessingBoomerang && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-none p-4 gap-3">
-            <div className="w-12 h-12 rounded-full border-4 border-amber-500/20 border-t-amber-400 animate-spin"></div>
-            <p className="text-xs text-white font-bold tracking-wide">Menyusun Video Boomerang Loop...</p>
+            {countdown > 0 && (
+              <button
+                onClick={handleCancelCountdown}
+                type="button"
+                className="mt-6 pointer-events-auto flex items-center gap-1 px-3 py-1.5 rounded-full bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700 text-xs font-semibold cursor-pointer transition-all active:scale-95 shadow-lg"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Batal</span>
+              </button>
+            )}
           </div>
         )}
 
@@ -459,32 +376,26 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
           })}
         </div>
 
-        {/* Bottom Shutter Controls */}
-        <button
-          onClick={triggerCapture}
-          disabled={countdown !== null || isLoadingCamera || !!cameraError || isRecordingBoomerang || isProcessingBoomerang}
-          type="button"
-          className="relative group p-1 rounded-full transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-          title={captureMode === 'boomerang' ? 'Rekam Boomerang' : 'Ambil Foto'}
-        >
-          {/* Outer glowing ring */}
-          <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-full border-4 border-white/80 group-hover:border-rose-400 flex items-center justify-center transition-all p-1 shadow-lg bg-black/40 backdrop-blur-sm">
-            {/* Inner Shutter Button */}
-            <div
-              className={`w-full h-full rounded-full transition-transform flex items-center justify-center shadow-inner ${
-                captureMode === 'boomerang'
-                  ? 'bg-gradient-to-tr from-amber-500 to-rose-500 group-hover:scale-95'
-                  : 'bg-gradient-to-tr from-rose-500 to-pink-500 group-hover:scale-95'
-              }`}
-            >
-              {captureMode === 'boomerang' ? (
-                <Repeat className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
-              ) : (
-                <Zap className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
-              )}
-            </div>
-          </div>
-        </button>
+        {/* Bottom Shutter Controls: Manual Tap to Start Countdown & Capture */}
+        <div className="flex flex-col items-center gap-1.5 w-full max-w-sm">
+          <button
+            onClick={triggerCapture}
+            disabled={countdown !== null || isLoadingCamera || !!cameraError}
+            type="button"
+            className="w-full py-3 px-6 rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 hover:brightness-110 active:scale-[0.98] text-white font-bold text-sm sm:text-base flex items-center justify-center gap-2 shadow-xl shadow-rose-950/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            title="Tekan untuk Mulai Hitung Mundur & Ambil Foto"
+          >
+            <Camera className="w-5 h-5 text-white" />
+            <span>
+              {countdown !== null
+                ? `Bersiap! Mengambil foto dalam ${countdown}...`
+                : 'Ambil Foto (Hitung Mundur 5 Detik)'}
+            </span>
+          </button>
+          <span className="text-[10px] text-zinc-400 text-center">
+            Posisikan gaya Anda di preview, lalu tekan tombol untuk mulai hitung mundur
+          </span>
+        </div>
       </div>
     </div>
   );
