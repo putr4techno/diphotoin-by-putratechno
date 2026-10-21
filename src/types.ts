@@ -1,4 +1,4 @@
-export type ColorFilter = 'beauty' | 'glowing';
+export type ColorFilter = 'none' | 'beauty' | 'glowing';
 
 export interface FrameConfig {
   id: 'frame1' | 'frame2';

@@ -68,7 +68,10 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
         // Fallback with looser constraints
         stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: { facingMode },
+          video: {
+            facingMode,
+            aspectRatio: { ideal: 9 / 16 },
+          },
         });
       }
 
@@ -219,7 +222,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
       </div>
 
       {/* Main 9:16 Camera Viewport Container */}
-      <div className="relative w-full aspect-[9/16] max-h-[68dvh] mx-auto rounded-3xl overflow-hidden bg-black border-2 border-zinc-800 shadow-2xl flex items-center justify-center">
+      <div className="relative w-full max-w-[360px] aspect-[9/16] max-h-[68dvh] mx-auto rounded-3xl overflow-hidden bg-black border-2 border-zinc-800 shadow-2xl flex items-center justify-center">
         {/* Loading Spinner */}
         {isLoadingCamera && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-zinc-950/90 gap-3">
@@ -262,7 +265,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
           autoPlay
           playsInline
           muted
-          style={{ filter: activeFilterDef.cssFilter }}
+          style={{ filter: activeFilterDef.cssFilter === 'none' ? 'none' : activeFilterDef.cssFilter }}
           className={`w-full h-full object-cover transition-all duration-300 ${
             isMirror && facingMode === 'user' ? 'scale-x-[-1]' : 'scale-x-1'
           }`}
@@ -295,27 +298,34 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
 
       {/* Filter Selector Utility & Shutter Bar */}
       <div className="flex flex-col items-center gap-2 pt-2 z-20">
-        {/* Effect Selector: Only Beauty & Glowing */}
-        <div className="flex items-center gap-1.5 p-1 rounded-full bg-zinc-900/90 border border-zinc-800/80 backdrop-blur-md shadow-lg max-w-xs w-full justify-center">
+        {/* Effect Selector: 3 options (Tanpa Efek, Beauty, Glowing) */}
+        <div className="flex items-center gap-1.5 p-1 rounded-full bg-zinc-900/90 border border-zinc-800/80 backdrop-blur-md shadow-lg max-w-sm w-full justify-center">
           {COLOR_FILTERS.map((f) => {
             const isActive = selectedFilter === f.id;
+            const isNone = f.id === 'none';
             const isBeauty = f.id === 'beauty';
+
+            const activeClass = isNone
+              ? 'bg-zinc-700 text-white shadow-md scale-[1.02]'
+              : isBeauty
+              ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md shadow-rose-950/50 scale-[1.02]'
+              : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-950/50 scale-[1.02]';
+
+            const icon = isNone ? '🌿' : isBeauty ? '✨' : '🌟';
 
             return (
               <button
                 key={f.id}
                 onClick={() => setSelectedFilter(f.id)}
                 type="button"
-                className={`flex-1 py-1.5 px-3 rounded-full text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`flex-1 py-1.5 px-2.5 rounded-full text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1 cursor-pointer ${
                   isActive
-                    ? isBeauty
-                      ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md shadow-rose-950/50 scale-[1.02]'
-                      : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-950/50 scale-[1.02]'
+                    ? activeClass
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
                 }`}
               >
-                <span>{isBeauty ? '✨' : '🌟'}</span>
-                <span>{f.label}</span>
+                <span>{icon}</span>
+                <span className="truncate">{f.label}</span>
               </button>
             );
           })}

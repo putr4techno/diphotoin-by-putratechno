@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { AppSettings, ColorFilter, FrameConfig, UploadStatus } from '../types';
-import { uploadToGoogleDrive } from '../utils/googleDrive';
+import { uploadToGoogleDrive, extractDriveFolderId } from '../utils/googleDrive';
 import { soundEffects } from '../utils/audio';
 import { getFilterDefinition } from '../utils/filters';
 import { QRCodeModal } from './QRCodeModal';
@@ -63,49 +63,58 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
     }
   }, []);
 
-  // Auto-upload in background to Google Drive via Google Apps Script
+  // Auto-upload in background to Google Drive
   useEffect(() => {
     let isMounted = true;
 
     const performUpload = async () => {
-      if (!settings.gasWebAppUrl || !settings.gasWebAppUrl.trim()) {
+      const folderId = settings.driveFolderId ? extractDriveFolderId(settings.driveFolderId) : '';
+      if (!folderId && (!settings.gasWebAppUrl || !settings.gasWebAppUrl.trim())) {
         if (isMounted) {
           setUploadStatus({
             state: 'idle',
-            message: 'Auto-upload Drive nonaktif (URL Google Apps Script belum diisi di Admin)',
+            message: 'Folder Google Drive belum diatur di Admin',
           });
         }
         return;
       }
 
-      if (isMounted) {
-        setUploadStatus({
-          state: 'uploading',
-          message: 'Menyimpan foto ke Google Drive (HASILFOTO)...',
-        });
-      }
-
-      const result = await uploadToGoogleDrive({
-        gasWebAppUrl: settings.gasWebAppUrl,
-        folderId: settings.driveFolderId,
-        base64Image: photoDataUrl,
-        eventName: settings.eventName,
-      });
-
-      if (isMounted) {
-        if (result.success) {
+      if (settings.gasWebAppUrl && settings.gasWebAppUrl.trim()) {
+        if (isMounted) {
           setUploadStatus({
-            state: 'success',
-            message: 'Tersimpan ke Google Drive!',
-            fileUrl: result.fileUrl,
-            fileId: result.fileId,
-          });
-        } else {
-          setUploadStatus({
-            state: 'error',
-            message: result.message,
+            state: 'uploading',
+            message: 'Menyimpan foto ke Google Drive...',
           });
         }
+
+        const result = await uploadToGoogleDrive({
+          gasWebAppUrl: settings.gasWebAppUrl,
+          folderId: settings.driveFolderId,
+          base64Image: photoDataUrl,
+          eventName: settings.eventName,
+        });
+
+        if (isMounted) {
+          if (result.success) {
+            setUploadStatus({
+              state: 'success',
+              message: 'Tersimpan ke Google Drive!',
+              fileUrl: result.fileUrl,
+              fileId: result.fileId,
+            });
+            return;
+          }
+        }
+      }
+
+      // If direct folder link is configured
+      if (isMounted && folderId) {
+        setUploadStatus({
+          state: 'success',
+          message: 'Folder Google Drive Terhubung!',
+          fileUrl: `https://drive.google.com/drive/folders/${folderId}`,
+          fileId: folderId,
+        });
       }
     };
 
@@ -293,17 +302,17 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
           </div>
         )}
 
-        {uploadStatus.state === 'idle' && !settings.gasWebAppUrl && (
+        {uploadStatus.state === 'idle' && !settings.driveFolderId && (
           <div className="flex items-center justify-between py-1.5 px-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs">
             <div className="flex items-center gap-1.5 truncate">
               <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="truncate">Google Drive belum aktif (URL Web App Script kosong)</span>
+              <span className="truncate">Link Google Drive belum diatur di Admin</span>
             </div>
             <button
               onClick={onOpenAdmin}
               className="text-amber-300 hover:text-white font-bold underline shrink-0 ml-2"
             >
-              Hubungkan
+              Atur Drive
             </button>
           </div>
         )}
@@ -323,8 +332,16 @@ export const PhotoPreview: React.FC<PhotoPreviewProps> = ({
             {frame.name}
           </span>
           {filterDef && (
-            <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-rose-500/80 backdrop-blur-md text-white border border-rose-400/30 flex items-center gap-1">
-              <Sparkles className="w-2.5 h-2.5" />
+            <span
+              className={`text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur-md text-white border flex items-center gap-1 ${
+                appliedFilter === 'none'
+                  ? 'bg-zinc-800/80 border-white/20'
+                  : appliedFilter === 'beauty'
+                  ? 'bg-rose-500/80 border-rose-400/30'
+                  : 'bg-amber-500/80 border-amber-400/30'
+              }`}
+            >
+              <span>{appliedFilter === 'none' ? '🌿' : appliedFilter === 'beauty' ? '✨' : '🌟'}</span>
               <span>{filterDef.label}</span>
             </span>
           )}

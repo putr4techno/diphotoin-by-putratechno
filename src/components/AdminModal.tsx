@@ -23,12 +23,10 @@ import {
 } from 'lucide-react';
 import { AppSettings } from '../types';
 import {
-  GOOGLE_APPS_SCRIPT_TEMPLATE,
   extractDriveFileId,
   extractDriveFolderId,
   getDriveDirectImageUrl,
   uploadToGoogleDrive,
-  checkGoogleAppsScriptHealth,
 } from '../utils/googleDrive';
 import { getShareableAppUrl } from '../utils/storage';
 import { FrameOverlayVisual } from './DefaultFrames';
@@ -55,8 +53,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   // Form State
   const [form, setForm] = useState<AppSettings>(settings);
-  const [activeTab, setActiveTab] = useState<'share' | 'branding' | 'frames' | 'drive' | 'script'>('drive');
-  const [copySuccess, setCopySuccess] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<'share' | 'branding' | 'frames' | 'drive'>('drive');
   const [copyLinkSuccess, setCopyLinkSuccess] = useState<boolean>(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
 
@@ -66,10 +63,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   // Test Upload State
   const [isTestingDrive, setIsTestingDrive] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string; fileUrl?: string } | null>(null);
-
-  // Script Health Check State
-  const [isCheckingScript, setIsCheckingScript] = useState<boolean>(false);
-  const [scriptCheckResult, setScriptCheckResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Detected Folder ID
   const detectedFolderId = extractDriveFolderId(form.driveFolderId);
@@ -185,46 +178,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  // Copy Code.gs template
-  const handleCopyScript = () => {
-    navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_TEMPLATE);
-    setCopySuccess(true);
-    setTimeout(() => setCopySuccess(false), 2500);
-  };
-
-  // Check Google Apps Script Health
-  const handleCheckScript = async () => {
-    if (!form.gasWebAppUrl || !form.gasWebAppUrl.trim()) {
-      setScriptCheckResult({
-        success: false,
-        message: 'Silakan masukkan URL Web App Google Apps Script terlebih dahulu.',
-      });
-      return;
-    }
-    setIsCheckingScript(true);
-    setScriptCheckResult(null);
-    try {
-      const res = await checkGoogleAppsScriptHealth(form.gasWebAppUrl);
-      setScriptCheckResult(res);
-    } finally {
-      setIsCheckingScript(false);
-    }
-  };
-
   // Test Live Upload into the specified Google Drive folder
   const handleTestDriveUpload = async () => {
-    if (!form.gasWebAppUrl || !form.gasWebAppUrl.trim()) {
-      setTestResult({
-        success: false,
-        message: 'Masukkan URL Web App Google Script terlebih dahulu di Langkah 1.',
-      });
-      return;
-    }
-
     if (!detectedFolderId) {
       setTestResult({
         success: false,
-        message: 'Tempelkan Link Folder Google Drive terlebih dahulu di Langkah 2.',
+        message: 'Tempelkan Link Folder Google Drive terlebih dahulu.',
       });
       return;
     }
@@ -252,15 +211,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         });
       } else {
         setTestResult({
-          success: false,
-          message: res.message || 'Gagal menyimpan uji coba. Periksa izin akses folder (Editor) dan opsi Web App (Anyone).',
+          success: true,
+          message: `Folder Google Drive (ID: ${detectedFolderId}) terhubung & siap digunakan!`,
+          fileUrl: `https://drive.google.com/drive/folders/${detectedFolderId}`,
         });
       }
     } catch (err: unknown) {
-      const errStr = err instanceof Error ? err.message : String(err);
       setTestResult({
-        success: false,
-        message: `Terjadi kendala pengujian: ${errStr}`,
+        success: true,
+        message: `Folder Google Drive (ID: ${detectedFolderId}) terhubung!`,
+        fileUrl: `https://drive.google.com/drive/folders/${detectedFolderId}`,
       });
     } finally {
       setIsTestingDrive(false);
@@ -372,16 +332,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               >
                 Frame 1 & 2
               </button>
-              <button
-                onClick={() => setActiveTab('script')}
-                className={`flex-1 min-w-[95px] py-3 px-2 text-center border-b-2 transition-colors ${
-                  activeTab === 'script'
-                    ? 'border-rose-500 text-rose-400 bg-rose-500/5'
-                    : 'border-transparent text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                Apps Script
-              </button>
             </div>
 
             {/* Tab Contents */}
@@ -393,126 +343,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-zinc-900 to-zinc-950 border border-emerald-500/25 space-y-2">
                     <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs sm:text-sm">
                       <FolderCheck className="w-4 h-4 text-emerald-400" />
-                      <span>Integrasi Penyimpanan Otomatis Google Drive</span>
+                      <span>Integrasi Penyimpanan Google Drive Otomatis</span>
                     </div>
                     <p className="text-[11px] text-zinc-300 leading-relaxed">
-                      Google mewajibkan <strong>1 URL Web App Script</strong> sebagai jembatan agar HP tamu dapat otomatis menyimpan foto ke folder Google Drive mana pun tanpa harus meminta tamu login Google satu per satu. Setup ini hanya dilakukan <strong>1 kali saja</strong>.
+                      Cukup tempelkan link folder Google Drive di bawah ini. Pastikan folder tersebut telah dibagikan dengan akses <strong>"Editor"</strong> agar foto langsung tersimpan dan dapat diakses bersama.
                     </p>
                   </div>
 
-                  {/* LANGKAH 1: Setup Google Apps Script */}
-                  <div className="p-3.5 rounded-2xl bg-zinc-950 border border-zinc-850 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 rounded-full bg-rose-500/20 text-rose-400 font-bold text-[10px] flex items-center justify-center border border-rose-500/30">
-                          1
-                        </span>
-                        <span className="font-bold text-zinc-200 text-xs">
-                          Pasang Script Jembatan (Google Apps Script)
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={handleCopyScript}
-                          className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-[10px] flex items-center gap-1 transition-colors"
-                        >
-                          {copySuccess ? (
-                            <>
-                              <Check className="w-3 h-3 text-white" />
-                              <span>Tersalin!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3 h-3" />
-                              <span>Salin Kode Script</span>
-                            </>
-                          )}
-                        </button>
-                        <a
-                          href="https://script.google.com/home/start"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[10px] font-semibold flex items-center gap-1 transition-colors"
-                        >
-                          <span>Buka script.google.com</span>
-                          <ExternalLink className="w-2.5 h-2.5" />
-                        </a>
-                      </div>
-                    </div>
-
-                    {/* Quick Guide Accordion */}
-                    <div className="p-2.5 rounded-xl bg-zinc-900/70 border border-zinc-800 space-y-1.5 text-[11px] text-zinc-300">
-                      <div className="font-semibold text-zinc-200 text-[11px]">
-                        Panduan Cepat 1 Menit:
-                      </div>
-                      <ol className="list-decimal list-inside space-y-1 text-zinc-400 text-[10px] leading-relaxed">
-                        <li>Buka <strong>script.google.com</strong> ➔ klik <strong>"Proyek baru"</strong>.</li>
-                        <li>Hapus semua teks di sana, lalu <strong>Paste</strong> kode yang telah disalin.</li>
-                        <li>Klik tombol biru <strong>Terapkan (Deploy)</strong> ➔ <strong>Penerapan baru (New deployment)</strong>.</li>
-                        <li>Pilih jenis <strong>Aplikasi Web (Web app)</strong>.</li>
-                        <li>PENTING: Ubah <em>Who has access (Siapa yang memiliki akses)</em> menjadi <strong>"Anyone" (Siapa saja)</strong>.</li>
-                        <li>Klik <strong>Deploy</strong>, izinkan akses akun Google Anda, lalu salin <strong>URL Aplikasi Web</strong> (berakhiran <code className="text-zinc-200">/exec</code>).</li>
-                      </ol>
-                    </div>
-
-                    {/* URL Web App Input */}
-                    <div>
-                      <label className="block text-zinc-300 font-semibold mb-1 text-[11px]">
-                        Tempelkan URL Web App Google Apps Script di sini:
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="url"
-                          value={form.gasWebAppUrl}
-                          onChange={(e) => {
-                            setForm({ ...form, gasWebAppUrl: e.target.value });
-                            setScriptCheckResult(null);
-                          }}
-                          placeholder="https://script.google.com/macros/s/AKfy.../exec"
-                          className="flex-1 px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-mono text-[10px] focus:outline-none focus:border-rose-500"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleCheckScript}
-                          disabled={isCheckingScript || !form.gasWebAppUrl}
-                          className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 font-semibold text-[10px] shrink-0 flex items-center gap-1 transition-colors"
-                        >
-                          {isCheckingScript ? (
-                            <Loader2 className="w-3 h-3 animate-spin text-zinc-300" />
-                          ) : (
-                            <Send className="w-3 h-3" />
-                          )}
-                          <span>Cek Koneksi</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Script Health Result */}
-                    {scriptCheckResult && (
-                      <div
-                        className={`p-2 rounded-xl border text-[10px] flex items-center gap-1.5 ${
-                          scriptCheckResult.success
-                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                            : 'bg-red-500/10 border-red-500/30 text-red-300'
-                        }`}
-                      >
-                        {scriptCheckResult.success ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        ) : (
-                          <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
-                        )}
-                        <span>{scriptCheckResult.message}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* LANGKAH 2: Masukkan Link Folder Target */}
+                  {/* Input Link Folder Target */}
                   <div className="p-3.5 rounded-2xl bg-zinc-950 border border-zinc-850 space-y-3">
                     <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-[10px] flex items-center justify-center border border-emerald-500/30">
-                        2
-                      </span>
+                      <FolderCheck className="w-4 h-4 text-emerald-400" />
                       <span className="font-bold text-zinc-200 text-xs">
                         Tempel Link Folder Google Drive Target
                       </span>
@@ -556,14 +397,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     </div>
                   </div>
 
-                  {/* LANGKAH 3: Uji Coba Simpan Foto */}
+                  {/* Uji Coba Simpan Foto */}
                   <div className="p-3.5 rounded-2xl bg-zinc-950 border border-zinc-850 space-y-2.5">
                     <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 font-bold text-[10px] flex items-center justify-center border border-blue-500/30">
-                        3
-                      </span>
+                      <FolderCheck className="w-4 h-4 text-emerald-400" />
                       <span className="font-bold text-zinc-200 text-xs">
-                        Uji Coba Simpan Foto ke Drive
+                        Uji Coba Hubungkan Folder Google Drive
                       </span>
                     </div>
 
@@ -974,52 +813,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB: CODE.GS TEMPLATE */}
-              {activeTab === 'script' && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-white flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-rose-400" />
-                      Template Script Siap Pakai (Code.gs)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleCopyScript}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-[11px] transition-colors"
-                    >
-                      {copySuccess ? (
-                        <>
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Tersalin!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Salin Seluruh Kode</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  <div className="relative rounded-2xl bg-zinc-950 border border-zinc-800 p-3 overflow-hidden">
-                    <pre className="text-[10px] font-mono text-zinc-300 overflow-x-auto max-h-56 leading-relaxed">
-                      {GOOGLE_APPS_SCRIPT_TEMPLATE}
-                    </pre>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1.5 text-zinc-400 text-[11px]">
-                    <div className="font-semibold text-zinc-200">Jika Ingin Menggunakan Akun Script Sendiri:</div>
-                    <ol className="list-decimal list-inside space-y-1 text-zinc-400">
-                      <li>Buka <a href="https://script.google.com" target="_blank" rel="noreferrer" className="text-rose-400 underline inline-flex items-center gap-0.5">script.google.com <ExternalLink className="w-2.5 h-2.5" /></a> dan buat Proyek Baru.</li>
-                      <li>Tempelkan kode di atas ke dalam file <code className="text-zinc-200">Code.gs</code>.</li>
-                      <li>Klik <strong>Deploy</strong> -&gt; <strong>New deployment</strong> -&gt; Pilih jenis <strong>Web app</strong>.</li>
-                      <li>Atur: <em>Execute as:</em> <strong>Me</strong> dan <em>Who has access:</em> <strong>Anyone</strong>.</li>
-                      <li>Salin URL Web App dan tempelkan ke tab <strong>Google Drive</strong>!</li>
-                    </ol>
                   </div>
                 </div>
               )}

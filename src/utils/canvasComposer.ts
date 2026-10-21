@@ -29,7 +29,7 @@ function drawPhotoCover(
   ctx: CanvasRenderingContext2D,
   source: HTMLVideoElement | HTMLImageElement,
   mirror: boolean,
-  colorFilter: ColorFilter = 'beauty',
+  colorFilter: ColorFilter = 'none',
   photoArea?: { x: number; y: number; width: number; height: number }
 ) {
   const targetX = photoArea?.x ?? 0;
@@ -270,7 +270,7 @@ export async function compositePhoto(
   frame: FrameConfig,
   settings: AppSettings,
   mirror: boolean = true,
-  colorFilter: ColorFilter = 'beauty'
+  colorFilter: ColorFilter = 'none'
 ): Promise<{ dataUrl: string; blob: Blob }> {
   const canvas = document.createElement('canvas');
   canvas.width = CANVAS_WIDTH;
